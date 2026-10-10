@@ -36,6 +36,11 @@ window.AttentionScene = class AttentionScene {
         // 自动播放状态
         this.isAutoPlaying = false;
         this.autoPlayStep = 0;
+        this.pendingTimers = new Set();
+        this.demoTimers = new Set();
+        this.disposed = false;
+        this.lights = [];
+        this.currentGuide = null;
     }
 
     init() {
@@ -54,6 +59,7 @@ window.AttentionScene = class AttentionScene {
         const grid = new THREE.GridHelper(60, 60, 0x333366, 0x1a1a2e);
         grid.position.y = -8;
         this.scene.add(grid);
+        this.grid = grid;
         
         // 场景内容
         this.setupScene();
@@ -80,6 +86,7 @@ window.AttentionScene = class AttentionScene {
         const purpleLight = new THREE.PointLight(0x8b5cf6, 2, 40);
         purpleLight.position.set(10, 10, -10);
         this.scene.add(purpleLight);
+        this.lights.push(ambient, mainLight, blueLight, purpleLight);
     }
 
     setupScene() {
@@ -286,13 +293,16 @@ window.AttentionScene = class AttentionScene {
                 const line = new THREE.Line(geometry, lineMat.clone());
                 line.userData.fromToken = i;
                 line.userData.toToken = j;
-                line.userData.weight = Math.random() * 0.5 + 0.1; // 模拟权重
+                line.userData.weight = Math.random() * 0.5 + 0.1; // 正的示意分数，逐行归一化
                 
                 this.mainGroup.add(line);
                 lines.push(line);
             });
+            const total = lines.reduce((sum, line) => sum + line.userData.weight, 0);
+            lines.forEach(line => { line.userData.weight /= total; });
             this.attentionLines.push(lines);
         });
+        lineMat.dispose();
     }
 
     createOutputLayer() {
@@ -532,8 +542,11 @@ window.AttentionScene = class AttentionScene {
     }
     
     // 教学步骤展示
-    showStep(step) {
+    showStep(step, fromDemo = false) {
+        if (this.disposed || ![1, 2, 3].includes(step)) return;
+        if (!fromDemo) this.cancelDemo();
         this.currentStep = step;
+        this.params.showQKV = step === 3;
         
         // 更新按钮状态
         document.querySelectorAll('#scene-controls .control-btn').forEach((btn, i) => {
@@ -543,7 +556,7 @@ window.AttentionScene = class AttentionScene {
         // 隐藏所有注意力线
         this.attentionLines.forEach(lines => {
             lines.forEach(line => {
-                gsap.to(line.material, { opacity: 0, duration: 0.3 });
+                gsap.to(line.material, { opacity: 0, duration: 0.3, overwrite: true });
             });
         });
         
@@ -559,25 +572,26 @@ window.AttentionScene = class AttentionScene {
             this.showStepGuide('🔢 计算Query与Key的点积得到相似度', container);
         } else if (step === 3) {
             // 步骤3：注意力权重 - 显示注意力线
-            this.toggleAllAttention();
+            this.toggleAllAttention(true);
             this.showStepGuide('🔗 注意力权重决定信息聚合比例', container);
         }
     }
     
     showStepGuide(message, container) {
         // 移除旧提示
-        const old = container.querySelector('.scene-guide-message');
-        if (old) old.remove();
+        if (!container || this.disposed) return;
+        this.currentGuide?.remove();
         
         const guide = document.createElement('div');
         guide.className = 'scene-guide-message';
         guide.innerHTML = message;
         container.appendChild(guide);
+        this.currentGuide = guide;
         
-        setTimeout(() => guide.classList.add('visible'), 100);
-        setTimeout(() => {
+        this.schedule(() => guide.classList.add('visible'), 100);
+        this.schedule(() => {
             guide.classList.remove('visible');
-            setTimeout(() => guide.remove(), 300);
+            this.schedule(() => guide.remove(), 300);
         }, 4000);
     }
     
@@ -607,33 +621,48 @@ window.AttentionScene = class AttentionScene {
         });
     }
     
+    schedule(callback, delay, demo = false) {
+        if (this.disposed) return null;
+        const id = setTimeout(() => {
+            this.pendingTimers.delete(id);
+            this.demoTimers.delete(id);
+            if (!this.disposed) callback();
+        }, delay);
+        this.pendingTimers.add(id);
+        if (demo) this.demoTimers.add(id);
+        return id;
+    }
+
+    cancelDemo() {
+        this.demoTimers.forEach(id => {
+            clearTimeout(id);
+            this.pendingTimers.delete(id);
+        });
+        this.demoTimers.clear();
+        this.isAutoPlaying = false;
+    }
+
     playFullAnimation() {
-        // 完整动画演示
-        this.showStep(1);
-        setTimeout(() => this.showStep(2), 3000);
-        setTimeout(() => this.showStep(3), 6000);
-    }
-    
-    // 开始自动播放（模态框关闭后调用）
-    startAutoPlay() {
+        if (this.disposed) return;
+        this.cancelDemo();
         this.isAutoPlaying = true;
-        // 延迟启动，让用户先看到场景
-        setTimeout(() => {
-            if (this.isAutoPlaying) {
-                this.playFullAnimation();
-            }
-        }, 500);
+        this.showStep(1, true);
+        this.schedule(() => this.showStep(2, true), 3000, true);
+        this.schedule(() => {
+            this.showStep(3, true);
+            this.isAutoPlaying = false;
+        }, 6000, true);
     }
-    
-    // 暂停/恢复自动播放
+
+    startAutoPlay() {
+        this.cancelDemo();
+        this.isAutoPlaying = true;
+        this.schedule(() => this.playFullAnimation(), 500, true);
+    }
+
     toggleAutoPlay() {
-        this.isAutoPlaying = !this.isAutoPlaying;
-        const btn = document.getElementById('btn-animate');
-        if (btn) {
-            btn.innerHTML = this.isAutoPlaying 
-                ? '<i class="fas fa-pause"></i> 暂停' 
-                : '<i class="fas fa-play"></i> 完整演示';
-        }
+        if (this.isAutoPlaying) this.cancelDemo();
+        else this.playFullAnimation();
     }
 
     activateAttention(tokenIndex) {
@@ -662,8 +691,7 @@ window.AttentionScene = class AttentionScene {
         this.params.selectedToken = tokenIndex;
     }
 
-    toggleAllAttention() {
-        const showAll = !this.params.showQKV;
+    toggleAllAttention(showAll = !this.params.showQKV) {
         this.params.showQKV = showAll;
         
         this.attentionLines.forEach((lines, i) => {
@@ -671,6 +699,7 @@ window.AttentionScene = class AttentionScene {
                 const weight = line.userData.weight;
                 gsap.to(line.material, {
                     opacity: showAll ? weight * 0.5 : 0,
+                    overwrite: true,
                     duration: 0.5
                 });
             });
@@ -679,9 +708,10 @@ window.AttentionScene = class AttentionScene {
 
     playAnimation() {
         // 依次激活每个Token的注意力
+        this.cancelDemo();
         let delay = 0;
         this.sentence.forEach((_, i) => {
-            setTimeout(() => {
+            this.schedule(() => {
                 this.activateAttention(i);
                 
                 // 高亮当前Token
@@ -696,7 +726,7 @@ window.AttentionScene = class AttentionScene {
                         delay: 0.5
                     });
                 }
-            }, delay);
+            }, delay, true);
             delay += 1000;
         });
     }
@@ -759,8 +789,42 @@ window.AttentionScene = class AttentionScene {
     }
 
     dispose() {
-        if (this.mainGroup) this.scene.remove(this.mainGroup);
-        if (this.bgParticles) this.scene.remove(this.bgParticles);
+        if (this.disposed) return;
+        this.disposed = true;
+        this.cancelDemo();
+        this.pendingTimers.forEach(id => clearTimeout(id));
+        this.pendingTimers.clear();
+        this.currentGuide?.remove();
+        this.currentGuide = null;
+        const geometries = new Set();
+        const materials = new Set();
+        const textures = new Set();
+        [this.mainGroup, this.bgParticles, this.grid].filter(Boolean).forEach(root => {
+            root.traverse(object => {
+                if (typeof gsap !== 'undefined') {
+                    [object.position, object.rotation, object.scale].forEach(value => gsap.killTweensOf(value));
+                }
+                if (object.geometry) geometries.add(object.geometry);
+                const list = Array.isArray(object.material) ? object.material : [object.material];
+                list.filter(Boolean).forEach(material => materials.add(material));
+            });
+            this.scene.remove(root);
+        });
+        materials.forEach(material => {
+            if (typeof gsap !== 'undefined') gsap.killTweensOf(material);
+            Object.values(material).forEach(value => { if (value?.isTexture) textures.add(value); });
+            material.dispose();
+        });
+        geometries.forEach(geometry => geometry.dispose());
+        textures.forEach(texture => texture.dispose());
+        this.lights.forEach(light => this.scene.remove(light));
+        if (typeof gsap !== 'undefined') gsap.killTweensOf(this.camera.position);
+        this.lights = [];
+        this.interactables = [];
+        this.tokenNodes = [];
+        this.qkvNodes = [];
+        this.attentionLines = [];
+        this.mainGroup = this.bgParticles = this.grid = null;
     }
 
     onBackgroundClick() {
@@ -777,7 +841,7 @@ window.AttentionScene = class AttentionScene {
         // 隐藏注意力线
         this.attentionLines.forEach(lines => {
             lines.forEach(line => {
-                gsap.to(line.material, { opacity: 0, duration: 0.3 });
+                gsap.to(line.material, { opacity: 0, duration: 0.3, overwrite: true });
             });
         });
     }

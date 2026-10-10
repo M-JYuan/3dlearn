@@ -95,7 +95,7 @@
                                 <div class="absolute inset-0 bg-blue-500 blur-xl opacity-20"></div>
                             </div>
                             <h3 class="text-lg font-bold text-gray-100 tracking-wide">AI 教学实验室</h3>
-                            <p class="text-xs text-gray-500 mt-1">点击案例卡片开始探索 · 支持分类筛选</p>
+                            <p class="text-xs text-gray-500 mt-1">选择案例开始探索 · 支持分类与关键词搜索</p>
                         </div>
                         
                         <!-- 分类Tab栏 -->
@@ -123,10 +123,31 @@
                             </button>
                         </div>
                         
+                        <div class="case-search-tools" role="search" aria-label="搜索教学案例">
+                            <label for="case-search">搜索案例</label>
+                            <div class="case-search-field">
+                                <input id="case-search" type="search" placeholder="搜索当前分类的标题或关键词" autocomplete="off" aria-controls="quick-cases" aria-describedby="case-results-count">
+                                <button id="case-search-clear" type="button" hidden>清空</button>
+                            </div>
+                            <p id="case-results-count" role="status" aria-live="polite" aria-atomic="true"></p>
+                        </div>
+
+                        <div id="scene-load-error" class="scene-load-error" hidden>
+                            <p id="scene-load-error-message" role="alert"></p>
+                            <div class="scene-load-error-actions">
+                                <button id="scene-load-retry" type="button">重试此场景</button>
+                                <button id="scene-load-dismiss" type="button">关闭提示</button>
+                            </div>
+                        </div>
+
                         <!-- 快捷案例滚动容器 -->
                         <div class="quick-cases-wrapper">
                             <div id="quick-cases" class="quick-cases-grid">
                                 <!-- JS动态生成 -->
+                            </div>
+                            <div id="case-search-empty" class="case-search-empty" hidden>
+                                <p>当前分类中没有匹配的案例，请更换关键词或分类。</p>
+                                <button id="case-search-reset" type="button">清除筛选，查看全部</button>
                             </div>
                         </div>
                     </div>

@@ -16,9 +16,11 @@ const state = {
     webglReady: false,
     isAIChatting: false, // AI正在回复中
     currentSceneConfig: null, // 当前场景配置
+    generationId: 0, // 作废过期的打字、加载及场景介绍任务
+    failedSceneConfig: null,
 };
 
-const WELCOME_MESSAGE = '嗨，你好呀！我是助手小静老师。你对哪个3D场景感兴趣呢？是神经元信号传递，还是迷宫寻路算法。你可以在右边选择。';
+const WELCOME_MESSAGE = '嗨，你好呀！我是助手小静老师。你对哪个3D场景感兴趣呢？是显微镜下的细胞，还是迷宫寻路算法。你可以在右边选择。';
 
 // 初始化
 document.addEventListener('DOMContentLoaded', () => {
@@ -43,8 +45,10 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function scheduleWelcomeMessage() {
+    const generationId = state.generationId;
     waitForAvatarTutorReady().finally(() => {
         setTimeout(() => {
+            if (generationId !== state.generationId) return;
             presentAiMessage(WELCOME_MESSAGE, { syncWithSpeech: true });
         }, 200);
     });
@@ -119,7 +123,7 @@ function waitForAvatarTutorReady(timeoutMs = 7000) {
 
 function scheduleScenePreload() {
     if (!window.SceneLoader || !window.SceneLoader.preloadCases) return;
-    const preloadIds = ['quantum', 'gravity', 'electromagnetic', 'photosynthesis'];
+    const preloadIds = ['quantum', 'gravity', 'electromagnetic'];
 
     const runPreload = () => {
         window.SceneLoader.preloadCases(preloadIds).catch((error) => {
@@ -155,6 +159,33 @@ function setSceneLoadingState(isLoading, title = '正在加载场景资源...') 
     const textEl = document.getElementById('scene-loading-text');
     if (textEl) textEl.textContent = title;
     loadingEl.style.display = isLoading ? 'flex' : 'none';
+}
+
+function setSceneLoadError(caseConfig = null, error = null) {
+    state.failedSceneConfig = caseConfig;
+    const notice = document.getElementById('scene-load-error');
+    const retry = document.getElementById('scene-load-retry');
+    const dismiss = document.getElementById('scene-load-dismiss');
+    if (notice) notice.hidden = !caseConfig;
+    if (retry) retry.onclick = null;
+    if (dismiss) dismiss.onclick = null;
+    if (!caseConfig) return;
+
+    let reason = '请检查网络后重试，也可以选择其他案例。';
+    if (error?.code === 'SCENE_SCRIPT_TIMEOUT') {
+        reason = '资源等待超时，可点击重试继续等待；若多次超时，请检查网络并刷新页面。';
+    } else if (error?.code === 'SCENE_REGISTRATION_ERROR' || error?.code === 'SCENE_UNKNOWN') {
+        reason = '场景模块暂不可用，请刷新页面后重试，或选择其他案例。';
+    }
+    const message = document.getElementById('scene-load-error-message');
+    if (message) message.textContent = `“${caseConfig.title}”加载失败。${reason}`;
+
+    const generationId = state.generationId;
+    if (retry) retry.onclick = () => {
+        if (generationId !== state.generationId || state.failedSceneConfig !== caseConfig) return;
+        startGeneration(caseConfig);
+    };
+    if (dismiss) dismiss.onclick = () => setSceneLoadError();
 }
 
 function isWebGLAvailable() {
@@ -208,7 +239,7 @@ function initSceneManagerWithFallback() {
 const SCENE_CATEGORIES = {
     // 精选场景（用户指定的8个 + 智慧矿山）
     featured: [
-        'quantum', 'electromagnetic', 'photosynthesis', 'gravity', 
+        'quantum', 'electromagnetic', 'gravity',
         'maze', 'traffic', 'geometry-problem', 'solid-geometry', 'smartmine',
         'quadratic-function', 'circuit-ohm'
     ],
@@ -220,7 +251,12 @@ const SCENE_CATEGORIES = {
     ],
     // 生物类
     biology: [
-        'cell', 'dna', 'flagellar', 'photosynthesis', 'neuronsignal', 'sir-model'
+        'grade7-campus', 'grade7-life-test', 'grade7-microscope', 'grade7-cell-mount',
+        'grade7-cell-life', 'grade7-dolly', 'grade7-division', 'grade7-animal-levels',
+        'grade7-plant-levels', 'grade7-paramecium', 'grade7-cell-model',
+        'grade7-plant-groups', 'grade7-seed', 'grade7-invertebrate', 'grade7-fish-gill',
+        'grade7-amphibian', 'grade7-bird-mammal', 'grade7-microbe-lab', 'grade7-bacteria',
+        'grade7-fungus', 'grade7-virus', 'grade7-ferment', 'grade7-classify'
     ],
     // 数学类
     math: [
@@ -243,6 +279,7 @@ const SCENE_CATEGORIES = {
 
 // 当前激活的分类
 let activeCategory = 'featured';
+let caseSearchQuery = '';
 
 /**
  * 初始化快捷案例卡片
@@ -255,6 +292,7 @@ function initQuickCases() {
     const typeMap = {
         'attention': 'ai',
         'engine': 'ai',
+        'smartmine': 'ai',
         'quantum': 'physics',
         'hydraulic': 'physics',
         'pendulum': 'physics',
@@ -269,12 +307,29 @@ function initQuickCases() {
         'sorting': 'ai',
         'kmeans': 'ai',
         'maze': 'ai',
-        'neuronsignal': 'biology',
-        'cell': 'biology',
-        'dna': 'biology',
-        'flagellar': 'biology',
-        'photosynthesis': 'biology',
-        'sir-model': 'biology',
+        'grade7-cell-mount': 'biology',
+        'grade7-microscope': 'biology',
+        'grade7-life-test': 'biology',
+        'grade7-dolly': 'biology',
+        'grade7-division': 'biology',
+        'grade7-paramecium': 'biology',
+        'grade7-seed': 'biology',
+        'grade7-fish-gill': 'biology',
+        'grade7-classify': 'biology',
+        'grade7-campus': 'biology',
+        'grade7-cell-life': 'biology',
+        'grade7-animal-levels': 'biology',
+        'grade7-plant-levels': 'biology',
+        'grade7-plant-groups': 'biology',
+        'grade7-invertebrate': 'biology',
+        'grade7-amphibian': 'biology',
+        'grade7-bird-mammal': 'biology',
+        'grade7-cell-model': 'biology',
+        'grade7-microbe-lab': 'biology',
+        'grade7-bacteria': 'biology',
+        'grade7-fungus': 'biology',
+        'grade7-virus': 'biology',
+        'grade7-ferment': 'biology',
         'vector3d': 'math',
         'conic': 'math',
         'quadratic-function': 'math',
@@ -319,65 +374,90 @@ function initQuickCases() {
     renderCaseCards(container, typeMap, tagMap);
     
     // 初始化分类Tab事件
-    initCategoryTabs(container, typeMap, tagMap);
+    initCategoryTabs();
+    initCaseSearch();
     
     // 默认显示精选
-    filterCasesByCategory('featured');
+    filterCasesByCategory(activeCategory);
 }
 
 /**
  * 渲染案例卡片
  */
 function renderCaseCards(container, typeMap, tagMap) {
-    let html = '';
+    container.textContent = '';
     window.CasesConfig.CASES.forEach(c => {
         const cType = typeMap[c.id] || 'thinking';
-        const tag = tagMap[cType];
-        html += `
-            <div class="quick-case-card" data-case-id="${c.id}" data-type="${cType}">
-                <div class="quick-case-icon">
-                    <i class="fas ${c.icon}"></i>
-                </div>
-                <div class="quick-case-title">${c.title.split('(')[0].trim()}</div>
-                <span class="quick-case-tag">${tag}</span>
-            </div>
-        `;
-    });
-    
-    container.innerHTML = html;
-    
-    // 绑定点击事件
-    container.querySelectorAll('.quick-case-card').forEach(card => {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'quick-case-card';
+        card.dataset.caseId = c.id;
+        card.dataset.type = cType;
+        card.dataset.searchText = [c.id, c.title, c.description, ...(c.keywords || [])].join(' ').toLocaleLowerCase();
+        card.title = `${c.title}：${c.description || ''}`;
+        card.setAttribute('aria-label', `打开${c.title}`);
+
+        const icon = document.createElement('span');
+        icon.className = 'quick-case-icon';
+        icon.setAttribute('aria-hidden', 'true');
+        const glyph = document.createElement('i');
+        glyph.className = `fas ${c.icon}`;
+        icon.appendChild(glyph);
+        const title = document.createElement('span');
+        title.className = 'quick-case-title';
+        title.textContent = c.title.split('(')[0].trim();
+        const tag = document.createElement('span');
+        tag.className = 'quick-case-tag';
+        tag.textContent = tagMap[cType];
+        card.appendChild(icon);
+        card.appendChild(title);
+        card.appendChild(tag);
         card.addEventListener('click', () => {
-            const caseId = card.dataset.caseId;
-            const caseConfig = window.CasesConfig.CASES.find(c => c.id === caseId);
-            if (caseConfig) {
-                startGeneration(caseConfig);
-                addMessage('ai', `🚀 正在加载 <b>${caseConfig.title}</b>...`);
-            }
+            startGeneration(c);
+            addMessage('ai', `🚀 正在加载 ${c.title}...`);
         });
+        container.appendChild(card);
     });
 }
 
 /**
  * 初始化分类Tab事件
  */
-function initCategoryTabs(container, typeMap, tagMap) {
+function initCategoryTabs() {
     const tabContainer = document.getElementById('category-tabs');
     if (!tabContainer) return;
     
     tabContainer.querySelectorAll('.category-tab').forEach(tab => {
         tab.addEventListener('click', () => {
-            const category = tab.dataset.category;
-            
-            // 更新Tab激活状态
-            tabContainer.querySelectorAll('.category-tab').forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            
-            // 过滤案例
-            filterCasesByCategory(category);
-            activeCategory = category;
+            filterCasesByCategory(tab.dataset.category);
         });
+    });
+}
+
+function initCaseSearch() {
+    const input = document.getElementById('case-search');
+    if (!input) return;
+    input.value = caseSearchQuery;
+    input.addEventListener('input', () => {
+        caseSearchQuery = input.value;
+        filterCasesByCategory(activeCategory);
+    });
+    const clearSearch = () => {
+        caseSearchQuery = '';
+        input.value = '';
+        filterCasesByCategory(activeCategory);
+        input.focus();
+    };
+    document.getElementById('case-search-clear')?.addEventListener('click', clearSearch);
+    document.getElementById('case-search-reset')?.addEventListener('click', () => {
+        activeCategory = 'all';
+        clearSearch();
+    });
+    input.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && !event.isComposing) {
+            event.preventDefault();
+            clearSearch();
+        }
     });
 }
 
@@ -388,32 +468,31 @@ function filterCasesByCategory(category) {
     const container = document.getElementById('quick-cases');
     if (!container) return;
     
+    activeCategory = category === 'all' || Object.hasOwn(SCENE_CATEGORIES, category) ? category : 'all';
     const cards = container.querySelectorAll('.quick-case-card');
-    const categoryList = SCENE_CATEGORIES[category];
-    
+    const categoryList = SCENE_CATEGORIES[activeCategory];
+    const terms = caseSearchQuery.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+    let count = 0;
     cards.forEach(card => {
-        const caseId = card.dataset.caseId;
-        
-        if (category === 'all') {
-            // 全部显示
-            card.style.display = '';
-            card.style.opacity = '1';
-            card.style.transform = 'scale(1)';
-        } else if (categoryList && categoryList.includes(caseId)) {
-            // 在分类中
-            card.style.display = '';
-            card.style.opacity = '1';
-            card.style.transform = 'scale(1)';
-        } else {
-            // 不在分类中
-            card.style.display = 'none';
-        }
+        const inCategory = activeCategory === 'all' || categoryList.includes(card.dataset.caseId);
+        const matches = terms.every(term => card.dataset.searchText.includes(term));
+        card.hidden = !inCategory || !matches;
+        if (!card.hidden) count++;
     });
-    
-    // 添加过渡动画
-    requestAnimationFrame(() => {
-        const visibleCards = container.querySelectorAll('.quick-case-card[style*="display: none"] ~ .quick-case-card, .quick-case-card:not([style*="display: none"])');
+
+    let categoryName = '全部';
+    document.getElementById('category-tabs')?.querySelectorAll('.category-tab').forEach(tab => {
+        const active = tab.dataset.category === activeCategory;
+        tab.classList.toggle('active', active);
+        tab.setAttribute('aria-pressed', String(active));
+        if (active) categoryName = tab.textContent.trim();
     });
+    const counter = document.getElementById('case-results-count');
+    if (counter) counter.textContent = `${categoryName} · ${count} 个案例${terms.length ? '符合搜索条件' : ''}`;
+    const empty = document.getElementById('case-search-empty');
+    if (empty) empty.hidden = count !== 0;
+    const clear = document.getElementById('case-search-clear');
+    if (clear) clear.hidden = caseSearchQuery.length === 0;
 }
 
 function bindEvents() {
@@ -422,7 +501,10 @@ function bindEvents() {
     const sendBtn = document.getElementById('btn-send');
 
     userInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') handleSend();
+        if (e.key === 'Enter' && !e.isComposing) {
+            e.preventDefault();
+            handleSend();
+        }
     });
 
     sendBtn.addEventListener('click', handleSend);
@@ -511,6 +593,13 @@ function updateHomeButtonVisibility(visible) {
  * 清理当前场景，重新显示案例卡片列表，便于选择其他场景
  */
 function returnToHome() {
+    state.generationId += 1;
+    state.isAIChatting = false;
+    window.VoiceTutor?.stop?.();
+    state.currentTopic = null;
+    setSceneLoadError();
+    setSceneLoadingState(false);
+    document.getElementById('scene-intro-modal')?.remove();
     // 若正处于全屏，先退出全屏
     const displaySection = document.getElementById('display-section');
     if (displaySection && displaySection.classList.contains('scene-fullscreen')) {
@@ -652,6 +741,7 @@ function handleSend() {
  * AI智能对话
  */
 async function handleAIChat(text) {
+    const generationId = state.generationId;
     state.isAIChatting = true;
     window.VoiceTutor?.setThinking();
     
@@ -662,7 +752,13 @@ async function handleAIChat(text) {
     try {
         const result = await window.AIService.chat(text);
         
-        if (result.success) {
+        if (generationId !== state.generationId) {
+            removeThinkingMessage(thinkingId);
+            return;
+        } else if (result.cancelled) {
+            removeThinkingMessage(thinkingId);
+            window.VoiceTutor?.setState('idle');
+        } else if (result.success) {
             await presentAiMessage(result.message, {
                 syncWithSpeech: true,
                 beforeDisplay: () => removeThinkingMessage(thinkingId)
@@ -674,12 +770,13 @@ async function handleAIChat(text) {
         }
     } catch (error) {
         removeThinkingMessage(thinkingId);
+        if (generationId !== state.generationId) return;
         addMessage('ai', '😅 抱歉，网络似乎有点问题，请稍后再试。');
         window.VoiceTutor?.setState('error', '老师暂时无法语音回应');
         console.error('AI Chat Error:', error);
     }
     
-    state.isAIChatting = false;
+    if (generationId === state.generationId) state.isAIChatting = false;
 }
 
 /**
@@ -712,12 +809,14 @@ function addMessage(role, text) {
     const chatHistory = document.getElementById('chat-history');
     const div = document.createElement('div');
     div.className = `chat-bubble bubble-${role} flex flex-col`;
-    div.innerHTML = text;
+    div.textContent = text;
+    div.style.whiteSpace = 'pre-wrap';
     chatHistory.appendChild(div);
     chatHistory.scrollTop = chatHistory.scrollHeight;
 }
 
 function presentAiMessage(text, options = {}) {
+    const generationId = state.generationId;
     const messageText = `${options.prefix || ''}${text}`;
     const speakText = options.speakText || text;
     const shouldSpeak = options.speak !== false && window.VoiceTutor?.speak;
@@ -732,7 +831,7 @@ function presentAiMessage(text, options = {}) {
         if (displayed) return;
         displayed = true;
         options.beforeDisplay?.();
-        addMessage('ai', messageText);
+        if (generationId === state.generationId) addMessage('ai', messageText);
         resolveDisplayed();
     };
 
@@ -808,11 +907,25 @@ function showConfirmCard(caseConfig) {
  * 优化：确保1.25秒内完成展示
  */
 function startGeneration(caseConfig) {
+    const generationId = ++state.generationId;
+    state.isAIChatting = false;
+    state.currentSceneConfig = null;
+    setSceneLoadError();
+    window.AIService?.setSceneContext?.(null);
+    window.VoiceTutor?.stop?.();
+    if (state.webglReady && state.sceneManager?.currentSceneInstance) {
+        state.sceneManager.resetToEmptyScene();
+    }
+    const placeholder = document.getElementById('placeholder-text');
+    if (placeholder) placeholder.style.display = 'flex';
+    setSceneLoadingState(false);
+    document.getElementById('scene-intro-modal')?.remove();
+    updateHomeButtonVisibility(true);
     state.currentTopic = caseConfig.id;
     switchTab('code');
 
     const codeView = document.getElementById('code-content');
-    codeView.innerHTML = '';
+    codeView.textContent = '';
     codeView.className = 'cursor';
 
     // 从代码片段数据获取
@@ -828,16 +941,17 @@ function startGeneration(caseConfig) {
     const charsPerFrame = Math.max(3, Math.ceil(snippet.length / (targetDuration / 16))); // 约60fps
 
     function typeWriter() {
+        if (generationId !== state.generationId) return;
         if (i < snippet.length) {
             // 批量添加字符
             const endIndex = Math.min(i + charsPerFrame, snippet.length);
-            codeView.innerHTML += snippet.substring(i, endIndex);
+            codeView.textContent = snippet.substring(0, endIndex);
             i = endIndex;
             document.getElementById('view-code').scrollTop = document.getElementById('view-code').scrollHeight;
             requestAnimationFrame(typeWriter);
         } else {
             codeView.classList.remove('cursor');
-            finishGeneration(caseConfig);
+            finishGeneration(caseConfig, generationId);
         }
     }
     typeWriter();
@@ -846,12 +960,13 @@ function startGeneration(caseConfig) {
 /**
  * 完成生成 - 加载场景或PPT
  */
-async function finishGeneration(caseConfig) {
+async function finishGeneration(caseConfig, generationId = state.generationId) {
     // 模拟等待感
     await new Promise(r => setTimeout(r, 600));
+    if (generationId !== state.generationId) return;
 
     if (caseConfig.type === 'ppt') {
-        addMessage('ai', '✅ <b>课件已投屏。</b><br>请使用右下角按钮翻页。');
+        addMessage('ai', '✅ 课件已投屏。\n请使用右下角按钮翻页。');
         switchTab('ppt');
         renderSlide(0);
         updateHomeButtonVisibility(true);
@@ -862,7 +977,6 @@ async function finishGeneration(caseConfig) {
             window.AIService.setSceneContext(caseConfig);
         }
     } else {
-        addMessage('ai', `✅ <b>场景准备就绪。</b>`);
         switchTab('scene');
 
         if (!state.webglReady || !state.sceneManager) {
@@ -881,15 +995,12 @@ async function finishGeneration(caseConfig) {
                 await window.SceneLoader.ensureSceneLoaded(caseConfig);
             }
 
+            if (generationId !== state.generationId) return;
+
             const SceneClass = window.CasesConfig ? window.CasesConfig.getSceneClass(caseConfig.id) : null;
 
             if (SceneClass) {
-                // 隐藏占位符
-                document.getElementById('placeholder-text').style.display = 'none';
-                setSceneLoadingState(false);
-                updateHomeButtonVisibility(true);
-
-                // 加载场景
+                // 初始化成功后再隐藏卡片，失败时仍可选择其他场景。
                 state.sceneManager.loadScene(SceneClass);
 
                 // 创建标签
@@ -897,6 +1008,11 @@ async function finishGeneration(caseConfig) {
                     state.sceneManager.currentSceneInstance.createLabels(state.sceneManager);
                 }
                 
+                document.getElementById('placeholder-text').style.display = 'none';
+                setSceneLoadingState(false);
+                updateHomeButtonVisibility(true);
+                addMessage('ai', '✅ 场景准备就绪。');
+
                 // 设置AI辅导上下文
                 state.currentSceneConfig = caseConfig;
                 if (window.AIService) {
@@ -910,14 +1026,16 @@ async function finishGeneration(caseConfig) {
                 }
 
             } else {
-                setSceneLoadingState(false);
-                console.error("Scene Class not found for:", caseConfig.id);
-                addMessage('ai', '❌ 未找到对应的场景模块，请检查配置。');
+                const error = new Error(`Scene class not found: ${caseConfig.id}`);
+                error.code = 'SCENE_REGISTRATION_ERROR';
+                throw error;
             }
         } catch (e) {
-            setSceneLoadingState(false);
+            if (generationId !== state.generationId) return;
+            returnToHome();
+            setSceneLoadError(caseConfig, e);
             console.error("Failed to load scene module:", e);
-            addMessage('ai', '❌ 场景加载失败（已自动重试一次）。请稍后重试或切换其他场景。');
+            addMessage('ai', '❌ 场景加载失败。请稍后重试或切换其他场景。');
         }
     }
 }
@@ -926,6 +1044,7 @@ async function finishGeneration(caseConfig) {
  * 显示场景介绍模态框
  */
 function showIntroModal(intro) {
+    const generationId = state.generationId;
     // 移除旧模态框
     const oldModal = document.getElementById('scene-intro-modal');
     if (oldModal) oldModal.remove();
@@ -993,12 +1112,17 @@ function showIntroModal(intro) {
         // AI老师发送场景引导消息
         if (window.AIService && state.currentSceneConfig) {
             setTimeout(async () => {
-                const result = await window.AIService.getSceneIntroduction();
-                if (result.success) {
-                    await presentAiMessage(result.message, {
-                        prefix: '🎓 ',
-                        syncWithSpeech: true
-                    });
+                if (generationId !== state.generationId) return;
+                try {
+                    const result = await window.AIService.getSceneIntroduction();
+                    if (generationId === state.generationId && result.success) {
+                        await presentAiMessage(result.message, {
+                            prefix: '🎓 ',
+                            syncWithSpeech: true
+                        });
+                    }
+                } catch (error) {
+                    console.warn('场景介绍获取失败:', error);
                 }
             }, 1000);
         }
@@ -1026,19 +1150,25 @@ function switchTab(tabName) {
     document.getElementById(`tab-${tabName}`).classList.add('active');
     document.querySelectorAll('.content-view').forEach(view => view.classList.remove('active'));
     document.getElementById(`view-${tabName}`).classList.add('active');
+    if (tabName === 'scene') {
+        requestAnimationFrame(() => state.sceneManager?.handleResize());
+    } else if (tabName === 'ppt') {
+        renderSlide(state.pptIndex);
+    }
 }
 
 // --- PPT 逻辑 ---
 function renderSlide(index) {
-    state.pptIndex = index;
     const container = document.getElementById('slide-container');
     const slides = window.pptSlides; // 获取全局 slide 数据
 
-    if (!slides) {
+    if (!Array.isArray(slides) || slides.length === 0) {
         container.innerHTML = '<div>PPT 数据加载失败</div>';
         return;
     }
 
+    index = Math.max(0, Math.min(Number.isInteger(index) ? index : 0, slides.length - 1));
+    state.pptIndex = index;
     const slide = slides[index];
 
     container.innerHTML = `

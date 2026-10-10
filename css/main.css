@@ -602,7 +602,7 @@ body {
     z-index: 10;
     pointer-events: auto;
     overflow: hidden;
-    padding-top: 120px; /* 整体下移 */
+    padding-top: clamp(16px, 8vh, 90px);
 }
 
 #placeholder-text .quick-cases-grid {
@@ -650,6 +650,96 @@ body {
 
 #placeholder-text .quick-case-card {
     pointer-events: auto;
+}
+
+.case-search-tools,
+.scene-load-error {
+    width: min(960px, 92%);
+    flex-shrink: 0;
+    margin-bottom: 10px;
+    font-size: 13px;
+}
+
+.case-search-tools label {
+    display: block;
+    margin-bottom: 5px;
+    color: #cbd5e1;
+}
+
+.case-search-field {
+    display: flex;
+    gap: 8px;
+}
+
+.case-search-field input {
+    flex: 1;
+    min-width: 0;
+    padding: 9px 12px;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    border-radius: 8px;
+    background: rgba(15, 23, 42, 0.85);
+    color: #f1f5f9;
+}
+
+.case-search-field input::placeholder {
+    color: #94a3b8;
+}
+
+#case-results-count {
+    margin-top: 6px;
+    color: #94a3b8;
+    font-size: 12px;
+}
+
+.case-search-tools button,
+.case-search-empty button,
+.scene-load-error button {
+    padding: 8px 12px;
+    border: 1px solid rgba(96, 165, 250, 0.5);
+    border-radius: 8px;
+    background: rgba(30, 64, 175, 0.3);
+    color: #dbeafe;
+    cursor: pointer;
+}
+
+.case-search-empty {
+    padding: 24px 16px;
+    text-align: center;
+    color: #cbd5e1;
+    font-size: 13px;
+}
+
+.case-search-empty button {
+    margin-top: 12px;
+}
+
+.scene-load-error {
+    padding: 10px 12px;
+    border: 1px solid rgba(251, 191, 36, 0.45);
+    border-radius: 10px;
+    background: rgba(120, 53, 15, 0.2);
+    color: #fde68a;
+}
+
+.scene-load-error-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.quick-case-card:focus-visible,
+.category-tab:focus-visible,
+.case-search-tools :focus-visible,
+.case-search-empty button:focus-visible,
+.scene-load-error button:focus-visible {
+    outline: 2px solid #93c5fd;
+    outline-offset: 3px;
+}
+
+.quick-case-card[hidden],
+.case-search-empty[hidden],
+.scene-load-error[hidden] {
+    display: none;
 }
 
 /* ========== 场景分类Tab ========== */
@@ -715,6 +805,9 @@ body {
 
 /* 案例网格滚动容器 */
 .quick-cases-wrapper {
+    flex: 1 1 auto;
+    min-height: 0;
+    width: min(980px, 100%);
     max-height: calc(100vh - 320px);
     overflow-y: auto;
     overflow-x: hidden;
@@ -1318,6 +1411,8 @@ body {
 }
 
 .quick-case-card {
+    min-width: 0;
+    font-family: inherit;
     background: rgba(20, 30, 50, 0.75);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 12px;
@@ -1377,6 +1472,7 @@ body {
 }
 
 .quick-case-title {
+    display: block;
     font-size: 12px;
     font-weight: 600;
     color: #e2e8f0;

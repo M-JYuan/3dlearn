@@ -19,6 +19,10 @@ window.QuadraticFunctionScene = class QuadraticFunctionScene {
         this.quizEl = null;
         this.summaryEl = null;
         this.currentStep = 0;
+        this.quizAnswers = {};
+        this.disposed = false;
+        this.guideTimers = new Set();
+        this.feedbackRequest = 0;
 
         this.params = { a: 1, b: 0, c: 0 };
         this.defaultCameraPos = { x: 0, y: 0, z: 20 };
@@ -29,18 +33,63 @@ window.QuadraticFunctionScene = class QuadraticFunctionScene {
         this.camera.position.set(this.defaultCameraPos.x, this.defaultCameraPos.y, this.defaultCameraPos.z);
         this.camera.lookAt(0, 0, 0);
 
+        const restored = this.restoreProgress();
         this.setupLights();
         this.setupScene();
         this.setupUI();
         this.setupDragControl();
 
         if (window.LearningEngine) {
-            window.LearningEngine.createSession(this.sceneId);
+            window.LearningEngine.getSession(this.sceneId);
             window.LearningEngine.completeStep(this.sceneId, 'read');
             window.LearningEngine.logEvent(this.sceneId, 'scene_enter', {});
         }
 
-        this.showGuide('📈 通过调节 a、b、c 自主探索二次函数图像变化');
+        this.showGuide(restored ? `📚 已恢复上次进度：第 ${this.currentStep + 1} 步，已保存 ${Object.keys(this.quizAnswers).length} 道作答。` : '📈 通过调节 a、b、c 自主探索二次函数图像变化');
+        this.persistProgress();
+    }
+
+    restoreProgress() {
+        const session = window.LearningEngine?.getSession(this.sceneId);
+        window.LearningEngine?.completeStep(this.sceneId, 'read');
+        const snapshot = session?.sceneState || {};
+        const values = snapshot.params || {};
+        for (const [key, limit] of [['a', 3], ['b', 8], ['c', 8]]) {
+            if (typeof values[key] === 'number' && Number.isFinite(values[key]) && Math.abs(values[key]) <= limit && (key !== 'a' || Math.abs(values[key]) >= 0.1)) this.params[key] = values[key];
+        }
+        const steps = window.LearningPathConfig?.[this.sceneId]?.steps || [];
+        this.currentStep = Number.isInteger(snapshot.currentStep) ? Math.max(0, Math.min(snapshot.currentStep, steps.length - 1)) : 0;
+        while (this.currentStep > 0 && !window.LearningEngine?.canAccessStep(this.sceneId, steps[this.currentStep].id)) this.currentStep--;
+        const answers = { ...session?.quizAnswers, ...snapshot.quizAnswers };
+        this.quizAnswers = {};
+        (window.QuizBank?.[this.sceneId] || []).forEach(question => {
+            if (question.options.some(option => option.value === answers[question.id])) this.quizAnswers[question.id] = answers[question.id];
+        });
+        return Object.keys(snapshot).length > 0 || (session?.completedSteps.size || 0) > 1;
+    }
+
+    persistProgress() {
+        window.LearningEngine?.updateSceneState?.(this.sceneId, {
+            currentStep: this.currentStep,
+            params: { ...this.params },
+            quizAnswers: { ...this.quizAnswers }
+        });
+    }
+
+    closeLearningPanels() {
+        this.feedbackRequest++;
+        ['blackboardEl', 'quizEl', 'summaryEl'].forEach(key => {
+            this[key]?.remove();
+            this[key] = null;
+        });
+    }
+
+    scheduleGuide(callback, delay) {
+        const timer = setTimeout(() => {
+            this.guideTimers.delete(timer);
+            if (!this.disposed) callback();
+        }, delay);
+        this.guideTimers.add(timer);
     }
 
     setupLights() {
@@ -76,8 +125,10 @@ window.QuadraticFunctionScene = class QuadraticFunctionScene {
     createVertexMarker() {
         if (this.vertexMesh) {
             this.mainGroup.remove(this.vertexMesh);
+            this.vertexMesh.geometry.dispose();
+            this.vertexMesh.material.dispose();
         }
-        const x0 = -this.params.b / (2 * this.params.a || 1e-6);
+        const x0 = -this.params.b / (2 * this.params.a);
         const y0 = this.params.a * x0 * x0 + this.params.b * x0 + this.params.c;
 
         this.vertexMesh = new THREE.Mesh(
@@ -86,6 +137,7 @@ window.QuadraticFunctionScene = class QuadraticFunctionScene {
         );
         this.vertexMesh.position.set(x0, y0, 0.2);
         this.vertexMesh.userData = {
+            onClick: target => this.showInfoPanel(target),
             hoverTitle: '顶点',
             hoverDesc: `(${x0.toFixed(2)}, ${y0.toFixed(2)})`,
             hoverIcon: 'fa-dot-circle',
@@ -98,6 +150,7 @@ window.QuadraticFunctionScene = class QuadraticFunctionScene {
         };
         this.mainGroup.add(this.vertexMesh);
         this.interactables = [this.vertexMesh];
+        this.syncCourseLabel();
     }
 
     drawParabola() {
@@ -137,30 +190,40 @@ window.QuadraticFunctionScene = class QuadraticFunctionScene {
                 <button class="control-btn" id="qf-guide"><i class="fas fa-chalkboard"></i> 步骤讲解</button>
                 <button class="control-btn" id="qf-quiz"><i class="fas fa-list-check"></i> 开始练习</button>
                 <button class="control-btn" id="qf-summary"><i class="fas fa-chart-line"></i> 学习总结</button>
-                <button class="control-btn" id="qf-reset"><i class="fas fa-redo"></i> 重置参数</button>
+                <button class="control-btn" id="qf-reset"><i class="fas fa-redo"></i> 重置课程</button>
                 <button class="control-btn" id="qf-view"><i class="fas fa-video"></i> 重置视角</button>
             </div>
         `;
 
-        const onAdjust = (key, value) => {
-            this.params[key] = Number(value);
-            this.drawParabola();
-            this.createVertexMarker();
-            if (window.LearningEngine) {
-                window.LearningEngine.recordExplore(this.sceneId, `adjust-${key}`);
-                const stepMap = { a: 'observe-a', b: 'observe-b', c: 'observe-c' };
-                window.LearningEngine.completeStep(this.sceneId, stepMap[key]);
-            }
-        };
 
-        document.getElementById('qf-a').oninput = (e) => onAdjust('a', e.target.value);
-        document.getElementById('qf-b').oninput = (e) => onAdjust('b', e.target.value);
-        document.getElementById('qf-c').oninput = (e) => onAdjust('c', e.target.value);
+
+        document.getElementById('qf-a').oninput = (e) => this.adjustParameter('a', e.target.value);
+        document.getElementById('qf-b').oninput = (e) => this.adjustParameter('b', e.target.value);
+        document.getElementById('qf-c').oninput = (e) => this.adjustParameter('c', e.target.value);
         document.getElementById('qf-guide').onclick = () => this.showStepGuide();
         document.getElementById('qf-quiz').onclick = () => this.showQuizPanel();
         document.getElementById('qf-summary').onclick = () => this.showSummaryCard();
         document.getElementById('qf-reset').onclick = () => this.reset();
         document.getElementById('qf-view').onclick = () => this.resetView();
+    }
+
+    adjustParameter(key, value) {
+        const limit = key === 'a' ? 3 : 8;
+        value = Number(value);
+        if (!['a', 'b', 'c'].includes(key) || !Number.isFinite(value)) return;
+        value = Math.max(-limit, Math.min(limit, value));
+        if (key === 'a' && Math.abs(value) < 0.1) {
+            value = this.params.a < 0 ? -0.1 : 0.1;
+            this.showGuide('二次函数要求 a ≠ 0，已将 a 调整到最接近的非零值。');
+        }
+        this.params[key] = value;
+        const input = document.getElementById('qf-' + key);
+        if (input) input.value = String(value);
+        this.drawParabola();
+        this.createVertexMarker();
+        window.LearningEngine?.recordExplore(this.sceneId, `adjust-${key}`);
+        window.LearningEngine?.completeStep(this.sceneId, { a: 'observe-a', b: 'observe-b', c: 'observe-c' }[key]);
+        this.persistProgress();
     }
 
     setupDragControl() {
@@ -221,6 +284,7 @@ window.QuadraticFunctionScene = class QuadraticFunctionScene {
         document.getElementById('qf-close-guide').onclick = () => this.blackboardEl?.remove();
         document.getElementById('qf-prev-step').onclick = () => {
             this.currentStep = Math.max(0, this.currentStep - 1);
+            this.persistProgress();
             this.showStepGuide();
         };
         document.getElementById('qf-next-step').onclick = () => {
@@ -231,6 +295,7 @@ window.QuadraticFunctionScene = class QuadraticFunctionScene {
             }
             const max = (window.LearningPathConfig?.[this.sceneId]?.steps?.length || 1) - 1;
             this.currentStep = Math.min(max, this.currentStep + 1);
+            this.persistProgress();
             this.showStepGuide();
         };
         document.getElementById('qf-run-step').onclick = () => this.executeStepAction(this.currentStep);
@@ -240,14 +305,26 @@ window.QuadraticFunctionScene = class QuadraticFunctionScene {
         const stepIndex = Number(action);
         const stepIds = ['read', 'observe-a', 'observe-b', 'observe-c', 'practice', 'summary'];
         const targetId = stepIds[stepIndex];
+        if (!targetId) return;
         if (targetId && !window.LearningEngine?.canAccessStep(this.sceneId, targetId)) {
             this.showGuide('⛳ 请按步骤学习，先完成前面的引导步骤。');
             return;
         }
-        if (window.LearningEngine && stepIds[stepIndex]) {
-            window.LearningEngine.completeStep(this.sceneId, stepIds[stepIndex]);
+        this.currentStep = stepIndex;
+        this.persistProgress();
+        if (targetId === 'practice') { this.closeLearningPanels(); this.showQuizPanel(); return; }
+        if (targetId === 'summary') { this.closeLearningPanels(); this.showSummaryCard(); return; }
+        if (stepIndex >= 1 && stepIndex <= 3) {
+            const key = ['a', 'b', 'c'][stepIndex - 1];
+            const samples = { a: [-1, 1], b: [-2, 2], c: [-3, 3] };
+            this.adjustParameter(key, this.params[key] === samples[key][0] ? samples[key][1] : samples[key][0]);
+            this.blackboardEl?.remove();
+            this.blackboardEl = null;
+            this.showGuide(`🔍 已将 ${key} 调整为 ${this.params[key]}，观察曲线与顶点变化。`);
+        } else {
+            window.LearningEngine?.completeStep(this.sceneId, targetId);
+            this.showGuide('✅ 已阅读题目，可以进入参数探索。');
         }
-        this.showGuide(`✅ 已完成：${stepIds[stepIndex] || '当前步骤'}`);
     }
 
     showQuizPanel() {
@@ -255,7 +332,8 @@ window.QuadraticFunctionScene = class QuadraticFunctionScene {
             this.showGuide('📌 请先完成 a、b、c 三个探索步骤后再开始练习。');
             return;
         }
-        if (this.quizEl) this.quizEl.remove();
+        this.closeLearningPanels();
+        this.demoState = null;
         const quizList = window.QuizBank?.[this.sceneId] || [];
         const parent = document.getElementById('view-scene');
         this.quizEl = document.createElement('div');
@@ -272,7 +350,7 @@ window.QuadraticFunctionScene = class QuadraticFunctionScene {
                             <p style="margin:0 0 8px;"><b>${idx + 1}. [${q.level}]</b> ${q.question}</p>
                             ${q.options.map(opt => `
                                 <label style="display:block; margin:4px 0;">
-                                    <input type="radio" name="${q.id}" value="${opt.value}"> ${opt.label}
+                                    <input type="radio" name="${q.id}" value="${opt.value}" ${this.quizAnswers[q.id] === opt.value ? 'checked' : ''}> ${opt.label}
                                 </label>
                             `).join('')}
                         </div>
@@ -287,8 +365,14 @@ window.QuadraticFunctionScene = class QuadraticFunctionScene {
         `;
         parent.appendChild(this.quizEl);
         window.LearningEngine?.logEvent(this.sceneId, 'quiz_open', {});
+        this.quizEl.querySelectorAll('input[type="radio"]').forEach(input => {
+            input.onchange = () => {
+                this.quizAnswers[input.name] = input.value;
+                this.persistProgress();
+            };
+        });
 
-        document.getElementById('qf-close-quiz').onclick = () => this.quizEl?.remove();
+        document.getElementById('qf-close-quiz').onclick = () => this.closeLearningPanels();
         document.getElementById('qf-submit-quiz').onclick = () => this.submitQuiz();
         document.getElementById('qf-ai-feedback').onclick = () => this.askAIFeedback();
     }
@@ -296,56 +380,62 @@ window.QuadraticFunctionScene = class QuadraticFunctionScene {
     submitQuiz() {
         const quizList = window.QuizBank?.[this.sceneId] || [];
         const feedbackBox = document.getElementById('qf-quiz-feedback');
-        let html = '';
-        let answeredCount = 0;
-        quizList.forEach((q) => {
-            const selected = document.querySelector(`input[name="${q.id}"]:checked`);
-            if (!selected) return;
-            answeredCount += 1;
-            const result = window.LearningEngine?.submitAnswer(this.sceneId, q, selected.value);
-            const ok = !!result?.isCorrect;
-            if (!ok) {
-                html += `<p>❌ ${q.id}: ${q.feedbackTemplate}</p>`;
-            } else {
-                html += `<p>✅ ${q.id}: 回答正确</p>`;
-            }
-        });
-
-        if (answeredCount < quizList.length) {
-            feedbackBox.innerHTML = `请先完成全部 ${quizList.length} 题再提交。`;
+        if (!feedbackBox || !window.LearningEngine?.canStartQuiz(this.sceneId)) return;
+        const answers = quizList.map(question => ({
+            question,
+            value: this.quizEl?.querySelector(`input[name="${question.id}"]:checked`)?.value
+        }));
+        if (!quizList.length || answers.some(({ question, value }) => !question.options.some(option => option.value === value))) {
+            feedbackBox.textContent = `请先完成全部 ${quizList.length} 题再提交。`;
             return;
         }
-
-        if (window.LearningEngine) {
-            window.LearningEngine.completeStep(this.sceneId, 'practice');
-            window.LearningEngine.logEvent(this.sceneId, 'quiz_submit_all', {
-                answeredCount,
-                total: quizList.length
-            });
-        }
-        feedbackBox.innerHTML = answeredCount === 0 ? '请先作答后提交。' : html;
+        const feedback = answers.map(({ question, value }, index) => {
+            this.quizAnswers[question.id] = value;
+            const result = window.LearningEngine.submitAnswer(this.sceneId, question, value);
+            return result.isCorrect ? `<p>✅ 第 ${index + 1} 题：回答正确</p>` : `<p>❌ 第 ${index + 1} 题：${question.feedbackTemplate}</p>`;
+        });
+        window.LearningEngine.completeStep(this.sceneId, 'practice');
+        window.LearningEngine.logEvent(this.sceneId, 'quiz_submit_all', { answeredCount: answers.length, total: quizList.length });
+        this.currentStep = 4;
+        this.persistProgress();
+        feedbackBox.innerHTML = feedback.join('') + '<p>练习已提交，可修改答案后重试，或查看学习总结。</p><button class="control-btn" id="qf-quiz-summary">查看学习总结</button>';
+        document.getElementById('qf-quiz-summary').onclick = () => this.showSummaryCard();
     }
 
     async askAIFeedback() {
         const feedbackBox = document.getElementById('qf-quiz-feedback');
         if (!feedbackBox) return;
-        const summary = window.LearningEngine?.getSummary(this.sceneId);
-        if (!window.AIService || !summary) return;
-
-        feedbackBox.innerHTML += '<p>🤖 AI正在生成点评...</p>';
-        const prompt = `你是数学老师。学生完成了二次函数练习，得分${summary.score}，薄弱点：${summary.weakPoints.join('、') || '暂无'}。请用120字内给出改进建议。`;
-        const result = await window.AIService.chat(prompt);
-        if (result?.success) {
-            feedbackBox.innerHTML += `<p>🎓 ${result.message}</p>`;
+        if (!window.LearningEngine?.hasCompletedStep(this.sceneId, 'practice')) {
+            feedbackBox.textContent = '请先提交全部练习，再获取 AI 点评。';
+            return;
+        }
+        const summary = window.LearningEngine.getSummary(this.sceneId);
+        if (!window.AIService) { feedbackBox.textContent = 'AI 服务暂不可用，请查看题目反馈和学习总结。'; return; }
+        const request = ++this.feedbackRequest;
+        const status = document.createElement('p');
+        status.textContent = '🤖 AI正在生成点评...';
+        feedbackBox.appendChild(status);
+        try {
+            const prompt = `你是数学老师。学生完成了二次函数练习，得分${summary.score}，薄弱点：${summary.weakPoints.join('、') || '暂无'}。请用120字内给出改进建议。`;
+            const result = await window.AIService.chat(prompt);
+            if (this.disposed || request !== this.feedbackRequest) return;
+            status.textContent = result?.success ? `🎓 ${result.message}` : 'AI 点评暂不可用，请查看题目反馈和学习总结。';
+        } catch (error) {
+            if (!this.disposed && request === this.feedbackRequest) status.textContent = 'AI 点评暂不可用，请稍后重试。';
         }
     }
 
     showSummaryCard() {
-        if (this.summaryEl) this.summaryEl.remove();
-        const summary = window.LearningEngine?.getSummary(this.sceneId) || { score: 0, level: '未开始', weakPoints: [], suggestion: '先完成步骤和练习。' };
-        if (window.LearningEngine) {
-            window.LearningEngine.completeStep(this.sceneId, 'summary');
+        if (!window.LearningEngine?.canAccessStep(this.sceneId, 'summary')) {
+            this.showGuide('📌 请先完成全部练习并提交，再查看学习总结。');
+            return;
         }
+        this.closeLearningPanels();
+        this.demoState = null;
+        window.LearningEngine.completeStep(this.sceneId, 'summary');
+        this.currentStep = 5;
+        this.persistProgress();
+        const summary = window.LearningEngine?.getSummary(this.sceneId) || { score: 0, level: '未开始', weakPoints: [], suggestion: '先完成步骤和练习。' };
 
         const weakMap = {
             'a-sign': 'a 的符号与开口方向',
@@ -382,21 +472,27 @@ window.QuadraticFunctionScene = class QuadraticFunctionScene {
     }
 
     showGuide(message) {
+        if (this.disposed) return;
         const container = document.getElementById('scene-canvas-container');
         const old = container.querySelector('.scene-guide-message');
         if (old) old.remove();
         const guide = document.createElement('div');
+        this.guide = guide;
         guide.className = 'scene-guide-message';
         guide.innerHTML = message;
         container.appendChild(guide);
-        setTimeout(() => guide.classList.add('visible'), 80);
-        setTimeout(() => {
+        this.scheduleGuide(() => guide.classList.add('visible'), 80);
+        this.scheduleGuide(() => {
             guide.classList.remove('visible');
-            setTimeout(() => guide.remove(), 280);
+            this.scheduleGuide(() => guide.remove(), 280);
         }, 3000);
     }
 
     reset() {
+        this.closeLearningPanels();
+        this.demoState = null;
+        this.currentStep = 0;
+        this.quizAnswers = {};
         this.params = { a: 1, b: 0, c: 0 };
         const a = document.getElementById('qf-a');
         const b = document.getElementById('qf-b');
@@ -407,8 +503,9 @@ window.QuadraticFunctionScene = class QuadraticFunctionScene {
         this.drawParabola();
         this.createVertexMarker();
         window.LearningEngine?.resetSession(this.sceneId);
-        window.LearningEngine?.createSession(this.sceneId);
+        window.LearningEngine?.getSession(this.sceneId);
         window.LearningEngine?.completeStep(this.sceneId, 'read');
+        this.persistProgress();
         this.showGuide('🔄 参数与学习进度已重置');
     }
 
@@ -447,11 +544,39 @@ window.QuadraticFunctionScene = class QuadraticFunctionScene {
     }
 
     createLabels(manager) {
+        this.removeCourseLabel();
         if (!this.vertexMesh) return;
-        manager.createLabel('顶点', this.vertexMesh.position.clone(), 'map-pin');
+        this.labelManager = manager;
+        const element = manager.createLabel('顶点', this.vertexMesh.position, 'map-pin');
+        this.courseLabel = manager.labels.find(label => label.element === element);
+        this.syncCourseLabel();
+    }
+
+    syncCourseLabel() {
+        if (this.courseLabel && this.vertexMesh) {
+            this.courseLabel.position.copy(this.vertexMesh.position);
+        }
+    }
+
+    removeCourseLabel() {
+        if (this.courseLabel) {
+            this.courseLabel.container.remove();
+            const index = this.labelManager?.labels.indexOf(this.courseLabel) ?? -1;
+            if (index >= 0) this.labelManager.labels.splice(index, 1);
+        }
+        this.courseLabel = null;
+        this.labelManager = null;
     }
 
     dispose() {
+        this.removeCourseLabel();
+        this.persistProgress();
+        this.disposed = true;
+        this.demoState = null;
+        this.feedbackRequest++;
+        this.guideTimers.forEach(timer => clearTimeout(timer));
+        this.guideTimers.clear();
+        this.guide?.remove();
         this.blackboardEl?.remove();
         this.quizEl?.remove();
         this.summaryEl?.remove();

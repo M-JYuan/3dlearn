@@ -24,6 +24,11 @@ class MazeScene {
         
         this.name = 'MazeScene';
         this.mainGroup = null;
+        this.runId = 0;
+        this.disposed = false;
+        this.pendingTasks = new Set();
+        this.guideTimers = new Set();
+        this.guide = null;
         
         // 迷宫配置 - 大幅增加复杂度
         this.mazeSize = 41; // 41x41 迷宫
@@ -395,7 +400,7 @@ class MazeScene {
         path.forEach((pos, i) => {
             const cell = this.cells[pos.z]?.[pos.x];
             if (cell && cell.type === 'floor') {
-                setTimeout(() => {
+                this.schedule(() => {
                     cell.mesh.material.color.setHex(pathColor);
                     cell.mesh.material.emissive.setHex(pathColor);
                     cell.mesh.material.emissiveIntensity = 0.8;
@@ -427,8 +432,56 @@ class MazeScene {
         robot.userData.currentZ = z;
     }
 
-    delay(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms || this.animationSpeed));
+    assertRun(runId) {
+        if (this.disposed || runId !== this.runId) {
+            const error = new Error('Scene operation cancelled');
+            error.name = 'AbortError';
+            throw error;
+        }
+    }
+
+    cancelPending() {
+        this.runId += 1;
+        this.isPaused = false;
+        this.pendingTasks.forEach(cancel => cancel());
+        this.pendingTasks.clear();
+        this.guideTimers.forEach(timer => clearTimeout(timer));
+        this.guideTimers.clear();
+        this.guide?.remove();
+        this.guide = null;
+    }
+
+    schedule(callback, ms) {
+        const runId = this.runId;
+        const timer = setTimeout(() => {
+            this.guideTimers.delete(timer);
+            if (!this.disposed && runId === this.runId) callback();
+        }, ms);
+        this.guideTimers.add(timer);
+        return timer;
+    }
+
+    delay(ms = this.animationSpeed) {
+        const runId = this.runId;
+        return new Promise((resolve, reject) => {
+            let timer;
+            const cancel = () => {
+                clearTimeout(timer);
+                this.pendingTasks.delete(cancel);
+                const error = new Error('Scene operation cancelled');
+                error.name = 'AbortError';
+                reject(error);
+            };
+            const finish = () => {
+                if (this.disposed || runId !== this.runId) { cancel(); return; }
+                // Do not resume an algorithm while paused, even if its delay expired.
+                if (this.isPaused) { timer = setTimeout(finish, 30); return; }
+                this.pendingTasks.delete(cancel);
+                resolve();
+            };
+            this.pendingTasks.add(cancel);
+            timer = setTimeout(finish, ms);
+        });
     }
 
     // ==================== 算法实现 ====================
@@ -437,6 +490,8 @@ class MazeScene {
      * 右手法则
      */
     async runRightHand(robotIndex) {
+        const runId = this.runId;
+        this.assertRun(runId);
         const corner = this.corners[robotIndex];
         let x = corner.x, z = corner.z;
         let dir = robotIndex < 2 ? 2 : 0; // 初始方向朝向中心
@@ -453,6 +508,7 @@ class MazeScene {
         while (!(x === this.center.x && z === this.center.z)) {
             if (!this.isRunning || this.raceFinished[robotIndex]) return null;
             while (this.isPaused) await this.delay(50);
+            this.assertRun(runId);
             
             const key = `${x},${z}`;
             if (!visited.has(key)) {
@@ -464,6 +520,7 @@ class MazeScene {
             
             this.moveRobot(robotIndex, x, z);
             await this.delay();
+            this.assertRun(runId);
             
             const tryOrder = [(dir + 1) % 4, dir, (dir + 3) % 4, (dir + 2) % 4];
             let moved = false;
@@ -494,6 +551,8 @@ class MazeScene {
      * DFS深度优先
      */
     async runDFS(robotIndex) {
+        const runId = this.runId;
+        this.assertRun(runId);
         const corner = this.corners[robotIndex];
         const visited = new Set();
         let steps = 0;
@@ -502,6 +561,7 @@ class MazeScene {
         const search = async (x, z, path) => {
             if (!this.isRunning || this.raceFinished[robotIndex] || foundPath) return false;
             while (this.isPaused) await this.delay(50);
+            this.assertRun(runId);
             
             const key = `${x},${z}`;
             if (visited.has(key)) return false;
@@ -511,6 +571,7 @@ class MazeScene {
             this.setCellColor(x, z, robotIndex, 'exploring');
             this.moveRobot(robotIndex, x, z);
             await this.delay();
+            this.assertRun(runId);
             this.updateRobotStats(robotIndex, visited.size, steps);
             
             if (x === this.center.x && z === this.center.z) {
@@ -526,13 +587,16 @@ class MazeScene {
             for (const { dx, dz } of directions) {
                 const nx = x + dx, nz = z + dz;
                 if (this.isValidCell(nx, nz) && !visited.has(`${nx},${nz}`)) {
-                    if (await search(nx, nz, [...path, { x, z }])) return true;
+                    const found = await search(nx, nz, [...path, { x, z }]);
+                    this.assertRun(runId);
+                    if (found) return true;
                 }
             }
             return false;
         };
         
         await search(corner.x, corner.z, []);
+        this.assertRun(runId);
         return foundPath ? { path: foundPath, explored: visited.size, steps } : null;
     }
 
@@ -540,6 +604,8 @@ class MazeScene {
      * BFS水淹算法
      */
     async runBFS(robotIndex) {
+        const runId = this.runId;
+        this.assertRun(runId);
         const corner = this.corners[robotIndex];
         const queue = [{ x: corner.x, z: corner.z, path: [] }];
         const visited = new Set([`${corner.x},${corner.z}`]);
@@ -553,6 +619,7 @@ class MazeScene {
         while (queue.length > 0) {
             if (!this.isRunning || this.raceFinished[robotIndex]) return null;
             while (this.isPaused) await this.delay(50);
+            this.assertRun(runId);
             
             // 批量处理一层
             const levelSize = Math.min(queue.length, 5);
@@ -579,6 +646,7 @@ class MazeScene {
             }
             
             await this.delay();
+            this.assertRun(runId);
             this.updateRobotStats(robotIndex, visited.size, steps);
         }
         return null;
@@ -588,6 +656,8 @@ class MazeScene {
      * A*算法
      */
     async runAStar(robotIndex) {
+        const runId = this.runId;
+        this.assertRun(runId);
         const corner = this.corners[robotIndex];
         const heuristic = (x, z) => Math.abs(x - this.center.x) + Math.abs(z - this.center.z);
         
@@ -608,6 +678,7 @@ class MazeScene {
         while (openSet.length > 0) {
             if (!this.isRunning || this.raceFinished[robotIndex]) return null;
             while (this.isPaused) await this.delay(50);
+            this.assertRun(runId);
             
             openSet.sort((a, b) => a.f - b.f);
             const current = openSet.shift();
@@ -621,6 +692,7 @@ class MazeScene {
             this.setCellColor(x, z, robotIndex, 'exploring');
             this.moveRobot(robotIndex, x, z);
             await this.delay();
+            this.assertRun(runId);
             this.updateRobotStats(robotIndex, closedSet.size, steps);
             
             if (x === this.center.x && z === this.center.z) {
@@ -651,6 +723,8 @@ class MazeScene {
      * Dijkstra算法
      */
     async runDijkstra(robotIndex) {
+        const runId = this.runId;
+        this.assertRun(runId);
         const corner = this.corners[robotIndex];
         const dist = {};
         const prev = {};
@@ -677,6 +751,7 @@ class MazeScene {
         while (unvisited.size > 0) {
             if (!this.isRunning || this.raceFinished[robotIndex]) return null;
             while (this.isPaused) await this.delay(50);
+            this.assertRun(runId);
             
             // 找最小距离节点
             let minDist = Infinity, minKey = null;
@@ -698,6 +773,7 @@ class MazeScene {
             
             if (steps % 3 === 0) {
                 await this.delay();
+                this.assertRun(runId);
                 this.updateRobotStats(robotIndex, steps, steps);
             }
             
@@ -733,6 +809,8 @@ class MazeScene {
      * 贪婪最佳优先搜索
      */
     async runGreedy(robotIndex) {
+        const runId = this.runId;
+        this.assertRun(runId);
         const corner = this.corners[robotIndex];
         const heuristic = (x, z) => Math.abs(x - this.center.x) + Math.abs(z - this.center.z);
         
@@ -748,6 +826,7 @@ class MazeScene {
         while (openSet.length > 0) {
             if (!this.isRunning || this.raceFinished[robotIndex]) return null;
             while (this.isPaused) await this.delay(50);
+            this.assertRun(runId);
             
             openSet.sort((a, b) => a.h - b.h);
             const current = openSet.shift();
@@ -757,6 +836,7 @@ class MazeScene {
             this.setCellColor(x, z, robotIndex, 'exploring');
             this.moveRobot(robotIndex, x, z);
             await this.delay();
+            this.assertRun(runId);
             this.updateRobotStats(robotIndex, visited.size, steps);
             
             if (x === this.center.x && z === this.center.z) {
@@ -780,6 +860,8 @@ class MazeScene {
      * 双向BFS
      */
     async runBidirectional(robotIndex) {
+        const runId = this.runId;
+        this.assertRun(runId);
         const corner = this.corners[robotIndex];
         
         const frontQueue = [{ x: corner.x, z: corner.z, path: [{ x: corner.x, z: corner.z }] }];
@@ -797,6 +879,7 @@ class MazeScene {
         while (frontQueue.length > 0 || backQueue.length > 0) {
             if (!this.isRunning || this.raceFinished[robotIndex]) return null;
             while (this.isPaused) await this.delay(50);
+            this.assertRun(runId);
             
             // 前向扩展
             if (frontQueue.length > 0) {
@@ -816,7 +899,7 @@ class MazeScene {
                         // 检查是否相遇
                         if (backVisited.has(key)) {
                             const backPath = backVisited.get(key);
-                            const fullPath = [...newPath, ...backPath.slice(1).reverse()];
+                            const fullPath = [...newPath, ...backPath.slice(0, -1).reverse()];
                             return { path: fullPath, explored: frontVisited.size + backVisited.size, steps };
                         }
                     }
@@ -839,7 +922,7 @@ class MazeScene {
                         
                         if (frontVisited.has(key)) {
                             const frontPath = frontVisited.get(key);
-                            const fullPath = [...frontPath, ...newPath.slice(1).reverse()];
+                            const fullPath = [...frontPath, ...newPath.slice(0, -1).reverse()];
                             return { path: fullPath, explored: frontVisited.size + backVisited.size, steps };
                         }
                     }
@@ -848,6 +931,7 @@ class MazeScene {
             
             this.moveRobot(robotIndex, frontQueue[0]?.x || corner.x, frontQueue[0]?.z || corner.z);
             await this.delay();
+            this.assertRun(runId);
             this.updateRobotStats(robotIndex, frontVisited.size + backVisited.size, steps);
         }
         return null;
@@ -866,7 +950,10 @@ class MazeScene {
      * 开始比赛
      */
     async startRace() {
-        if (this.isRunning) return;
+        if (this.disposed || this.isRunning) return;
+        this.cancelPending();
+        this.killMotion();
+        const runId = this.runId;
         
         this.isRunning = true;
         this.isPaused = false;
@@ -878,33 +965,46 @@ class MazeScene {
         
         this.showGuide('🏁 比赛开始！四个机器人同时出发！');
         
+        // Preserve the algorithms associated with this run if selectors change mid-race.
+        const raceAlgorithms = [...this.cornerAlgorithms];
         // 同时启动四个算法
         const races = this.corners.map((corner, i) => {
-            const algo = this.cornerAlgorithms[i];
+            const algo = raceAlgorithms[i];
             return this.runAlgorithm(i, algo);
         });
         
-        const results = await Promise.all(races);
+        try {
+            const results = await Promise.all(races);
+            this.assertRun(runId);
+
+            // 显示结果
+            let winner = -1;
+            let minPath = Infinity;
+            results.forEach((result, i) => {
+                if (result && result.path.length < minPath) {
+                    minPath = result.path.length;
+                    winner = i;
+                }
+                if (result) {
+                    this.highlightPath(i, result.path);
+                }
+            });
         
-        // 显示结果
-        let winner = -1;
-        let minPath = Infinity;
-        results.forEach((result, i) => {
-            if (result && result.path.length < minPath) {
-                minPath = result.path.length;
-                winner = i;
+            if (winner >= 0) {
+                const algoName = this.algorithms[raceAlgorithms[winner]].name;
+                this.showGuide(`🏆 ${this.corners[winner].name} (${algoName}) 获胜！路径长度: ${minPath}`);
             }
-            if (result) {
-                this.highlightPath(i, result.path);
-            }
-        });
         
-        if (winner >= 0) {
-            const algoName = this.algorithms[this.cornerAlgorithms[winner]].name;
-            this.showGuide(`🏆 ${this.corners[winner].name} (${algoName}) 获胜！路径长度: ${minPath}`);
+        } catch (error) {
+            if (error.name !== 'AbortError') {
+                if (runId === this.runId) { this.cancelPending(); this.killMotion(); this.isRunning = false; }
+                console.error('Maze race failed:', error);
+                this.showGuide('寻路中断，请重新生成迷宫后重试。');
+            }
+        } finally {
+            if (runId === this.runId) this.isRunning = false;
         }
-        
-        this.isRunning = false;
+
     }
 
     async runAlgorithm(robotIndex, algoName) {
@@ -920,7 +1020,15 @@ class MazeScene {
         }
     }
 
+    killMotion() {
+        this.robots.forEach(robot => gsap.killTweensOf(robot.position));
+        this.cells.flat().forEach(cell => {
+            if (cell?.mesh) gsap.killTweensOf(cell.mesh.position);
+        });
+    }
+
     resetVisualization() {
+        this.killMotion();
         // 重置机器人位置
         const offset = this.mazeSize / 2;
         this.corners.forEach((corner, i) => {
@@ -956,14 +1064,34 @@ class MazeScene {
         }
     }
 
+    releaseRemovedObjects(objects) {
+        const geometries = new Set();
+        const materials = new Set();
+        const textures = new Set();
+        objects.forEach(root => root.traverse(obj => {
+            if (obj.geometry) geometries.add(obj.geometry);
+            const list = Array.isArray(obj.material) ? obj.material : [obj.material];
+            list.filter(Boolean).forEach(material => materials.add(material));
+        }));
+        materials.forEach(material => Object.values(material).forEach(value => {
+            if (value?.isTexture) textures.add(value);
+        }));
+        textures.forEach(texture => texture.dispose());
+        materials.forEach(material => material.dispose());
+        geometries.forEach(geometry => geometry.dispose());
+        objects.forEach(root => this.mainGroup.remove(root));
+    }
+
     regenerateMaze() {
+        if (this.disposed) return;
+        this.cancelPending();
+        this.killMotion();
         this.isRunning = false;
         
         // 清除旧迷宫
-        this.cells.flat().forEach(cell => {
-            if (cell && cell.mesh) this.mainGroup.remove(cell.mesh);
-        });
-        if (this.centerMarker) this.mainGroup.remove(this.centerMarker);
+        const oldObjects = this.cells.flat().filter(cell => cell?.mesh).map(cell => cell.mesh);
+        if (this.centerMarker) oldObjects.push(this.centerMarker);
+        this.releaseRemovedObjects(oldObjects);
         
         this.generateMaze();
         this.createMazeVisualization();
@@ -1089,6 +1217,7 @@ class MazeScene {
     }
 
     showGuide(message) {
+        if (this.disposed) return;
         const container = document.getElementById('view-scene');
         if (!container) return;
         
@@ -1096,19 +1225,20 @@ class MazeScene {
         if (oldGuide) oldGuide.remove();
         
         const guide = document.createElement('div');
+        this.guide = guide;
         guide.className = 'scene-guide-message';
         guide.innerHTML = message;
         container.appendChild(guide);
         
-        setTimeout(() => guide.classList.add('visible'), 100);
-        setTimeout(() => {
+        this.schedule(() => guide.classList.add('visible'), 100);
+        this.schedule(() => {
             guide.classList.remove('visible');
-            setTimeout(() => guide.remove(), 300);
+            this.schedule(() => guide.remove(), 300);
         }, 3500);
     }
 
     startAutoPlay() {
-        setTimeout(() => {
+        this.schedule(() => {
             this.showGuide('🗺️ 41×41迷宫！四个机器人比赛到达中心！');
         }, 500);
     }
@@ -1135,6 +1265,9 @@ class MazeScene {
     }
 
     dispose() {
+        this.disposed = true;
+        this.cancelPending();
+        this.killMotion();
         this.isRunning = false;
         const panel = document.getElementById('maze-info-panel');
         if (panel) panel.remove();

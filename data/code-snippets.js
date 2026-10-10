@@ -127,27 +127,6 @@ function power(voltage, current) {
 // 2) 并联：Req 减小，I 增大
 // 3) 调参验证 U = I * R`,
 
-    cell: `class CellOrganelle {
-    constructor(name, role) {
-        this.name = name;
-        this.role = role;
-    }
-}
-
-const mitochondria = new CellOrganelle('线粒体', '能量工厂');
-const nucleus = new CellOrganelle('细胞核', '遗传信息中心');`,
-
-    dna: `const basePairs = {
-    A: 'T',
-    T: 'A',
-    G: 'C',
-    C: 'G'
-};
-
-function pairBase(base) {
-    return basePairs[base];
-}`,
-
     vector3d: `function dot(a, b) {
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
@@ -203,34 +182,6 @@ function countPasses(passCount, childNumber = 1, total = 8) {
 
 // 示例：传42次，花在 findHolder(42) = 3 号手里
 // 示例：传69次，1号传过 countPasses(69) = 9 次`,
-
-    flagellar: `// 细菌鞭毛马达 - 生物纳米机器
-class FlagellarMotor {
-    constructor() {
-        // 马达结构
-        this.stators = 8;         // 定子单元数
-        this.protonGradient = 0;  // 质子梯度
-        this.rotationSpeed = 0;   // 转速 (RPM)
-        this.direction = 'CCW';   // 旋转方向
-    }
-    
-    // 质子动力驱动
-    driveRotation(protonFlow) {
-        // 质子流过定子通道产生扭矩
-        const torque = protonFlow * this.stators;
-        this.rotationSpeed = torque * 1000; // 可达100,000 RPM
-        return this.rotationSpeed;
-    }
-    
-    // 切换旋转方向 (趋化反应)
-    switchDirection() {
-        // C环开关复合体控制方向
-        this.direction = this.direction === 'CCW' ? 'CW' : 'CCW';
-        // CCW = 游泳前进, CW = 翻滚改变方向
-    }
-}
-
-// 鞭毛马达效率接近100%，远超人造马达！`,
 
     gravity: `/**
  * 万有引力与时空弯曲模拟器
@@ -552,73 +503,6 @@ class HypercubeGenerator {
 
 // 顶点数 = 2^n，每升一维翻倍！`,
 
-    photosynthesis: `/**
- * 光合作用与呼吸作用模拟器
- * 生命能量转化的核心过程
- */
-class PhotosynthesisSimulator {
-    // ========== 光合作用 ==========
-    // 总反应：6CO₂ + 6H₂O + 光能 → C₆H₁₂O₆ + 6O₂
-    
-    // 光反应（类囊体膜）
-    lightReaction(water, photons) {
-        // 1. 光能激发叶绿素
-        const excitedElectrons = this.absorbLight(photons);
-        
-        // 2. 水的光解
-        // 2H₂O → 4H⁺ + 4e⁻ + O₂↑
-        const { protons, electrons, oxygen } = this.splitWater(water);
-        
-        // 3. 电子传递链
-        const ATP = this.electronTransportChain(electrons);
-        const NADPH = this.reduceNADP(electrons, protons);
-        
-        return { ATP, NADPH, O2: oxygen };
-    }
-    
-    // 暗反应 / 卡尔文循环（基质）
-    calvinCycle(CO2, ATP, NADPH) {
-        // 1. CO₂固定
-        const C3 = this.fixCO2(CO2); // 3-磷酸甘油酸
-        
-        // 2. 还原
-        const G3P = this.reduce(C3, ATP, NADPH);
-        
-        // 3. 再生RuBP
-        this.regenerateRuBP(G3P, ATP);
-        
-        // 每固定6个CO₂ → 1个葡萄糖
-        return this.synthesizeGlucose(G3P);
-    }
-    
-    // ========== 细胞呼吸 ==========
-    // 总反应：C₆H₁₂O₆ + 6O₂ → 6CO₂ + 6H₂O + 38ATP
-    
-    cellularRespiration(glucose, oxygen) {
-        // 1. 糖酵解（细胞质）
-        // 葡萄糖 → 2丙酮酸 + 2ATP + 2NADH
-        const { pyruvate, atp1, nadh1 } = this.glycolysis(glucose);
-        
-        // 2. 柠檬酸循环/三羧酸循环（线粒体基质）
-        const { atp2, nadh2, fadh2, co2 } = this.citricAcidCycle(pyruvate);
-        
-        // 3. 氧化磷酸化/电子传递链（线粒体内膜）
-        // NADH + FADH2 + O₂ → H₂O + 大量ATP
-        const atp3 = this.oxidativePhosphorylation(nadh1 + nadh2, fadh2, oxygen);
-        
-        // 总计：1葡萄糖 ≈ 38 ATP
-        return {
-            totalATP: atp1 + atp2 + atp3, // ≈ 38
-            CO2: co2,
-            H2O: 6
-        };
-    }
-}
-
-// 光合作用 ⇄ 呼吸作用 = 生态系统的能量基础
-// 🌱 植物：吸收CO₂，释放O₂
-// 🐕 动物：吸收O₂，释放CO₂`,
-
     maze: `/**
  * 迷宫寻路算法对比
  * 从入门到高级的进化之路
@@ -838,78 +722,6 @@ function merge(left, right) {
 // 排序1000个元素：
 // 冒泡：约500,000次比较 😱
 // 快排：约10,000次比较 🚀`,
-
-    neuronsignal: `/**
- * 神经元信号传递模拟器
- * 探索电信号如何在神经网络中传播
- */
-class NeuronSimulator {
-    // 神经元结构
-    static structure = {
-        dendrites: '树突 - 接收信号',
-        soma: '胞体 - 整合信号',
-        axon: '轴突 - 传导信号',
-        synapse: '突触 - 传递信号'
-    };
-    
-    // 静息电位
-    restingPotential = -70; // mV
-    
-    // 阈值电位
-    threshold = -55; // mV
-    
-    // 模拟动作电位
-    actionPotential(stimulus) {
-        let voltage = this.restingPotential;
-        
-        // 接收刺激
-        voltage += stimulus;
-        
-        // 检查是否达到阈值
-        if (voltage >= this.threshold) {
-            // 全或无定律！
-            console.log('🔥 动作电位发放！');
-            
-            // 快速去极化
-            voltage = +40; // 峰值
-            
-            // 复极化
-            voltage = -80; // 过极化
-            
-            // 恢复静息
-            voltage = this.restingPotential;
-            
-            return true; // 信号传递成功
-        }
-        
-        return false; // 未达阈值
-    }
-    
-    // 突触传递
-    synapticTransmission(actionPotential) {
-        if (!actionPotential) return;
-        
-        // 1. 动作电位到达轴突末梢
-        // 2. Ca²⁺ 内流
-        const calciumInflux = this.openCalciumChannels();
-        
-        // 3. 突触小泡与膜融合
-        // 4. 释放神经递质
-        const neurotransmitters = this.releaseVesicles(calciumInflux);
-        
-        // 5. 递质穿越突触间隙（20nm）
-        // 6. 与突触后受体结合
-        const postsynapticResponse = this.bindReceptors(neurotransmitters);
-        
-        return postsynapticResponse; // EPSP 或 IPSP
-    }
-}
-
-// 生物神经元 ↔ AI神经网络
-// 树突 → 输入层
-// 胞体整合 → 激活函数  
-// 轴突传导 → 权重连接
-// 突触强度 → 学习/权重更新`,
 
     gradientdescent: `/**
  * 神经网络梯度下降优化器

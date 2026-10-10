@@ -3,6 +3,7 @@ function jsonResponse(body, status = 200, extraHeaders = {}) {
         status,
         headers: {
             'Content-Type': 'application/json; charset=utf-8',
+            'Cache-Control': 'no-store',
             ...extraHeaders
         }
     });
@@ -25,7 +26,7 @@ function cleanText(input) {
         .slice(0, 260);
 }
 
-function pickConfig(env) {
+function pickConfig(env = {}) {
     const resourceId = env.VOLCANO_TTS_RESOURCE_ID || '';
     return {
         endpoint: env.VOLCANO_TTS_ENDPOINT || 'https://openspeech.bytedance.com/api/v1/tts',
@@ -196,10 +197,13 @@ async function synthesizeV3(config, text, safeSpeed, corsHeaders) {
                     audio_params: {
                         format: 'mp3',
                         sample_rate: 24000,
-                        speech_rate: safeSpeed
+                        // V3 uses percentage change; V1 uses a speed ratio.
+                        speech_rate: Math.round((safeSpeed - 1) * 100)
                     }
                 }
-            })
+            }),
+            redirect: 'error',
+            signal: AbortSignal.timeout(30000)
         });
 
         const textBody = await upstream.text();
@@ -253,7 +257,9 @@ async function synthesizeV1(config, text, safeSpeed, corsHeaders) {
                     pitch_ratio: 1
                 },
                 request: { reqid: crypto.randomUUID(), text, operation: 'query' }
-            })
+            }),
+            redirect: 'error',
+            signal: AbortSignal.timeout(30000)
         });
 
         const data = await upstream.json().catch(() => null);

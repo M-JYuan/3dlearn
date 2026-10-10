@@ -13,6 +13,9 @@ window.AIService = {
     
     // 对话历史（保持上下文）
     conversationHistory: [],
+    requestSeq: 0,
+    abortController: null,
+    REQUEST_TIMEOUT_MS: 30000,
     
     // 当前场景信息
     currentSceneInfo: null,
@@ -21,6 +24,7 @@ window.AIService = {
      * 设置当前场景信息
      */
     setSceneContext(sceneConfig) {
+        this.clearHistory();
         if (!sceneConfig) {
             this.currentSceneInfo = null;
             this.conversationHistory = [];
@@ -96,74 +100,59 @@ ${scene.intro.objectives ? scene.intro.objectives.map((o, i) => `${i+1}. ${o}`).
      * 发送消息并获取AI回复
      */
     async chat(userMessage) {
-        // 添加用户消息到历史
-        this.conversationHistory.push({
-            role: 'user',
-            content: userMessage
-        });
-        
-        // 限制历史长度，避免token过多
-        if (this.conversationHistory.length > 10) {
-            this.conversationHistory = this.conversationHistory.slice(-10);
-        }
-        
-        // 构建消息数组
-        const messages = [
-            {
-                role: 'system',
-                content: this.buildSystemPrompt()
-            },
-            ...this.conversationHistory
-        ];
-        
+        const content = typeof userMessage === 'string' ? userMessage.trim() : '';
+        if (!content) return { success: false, message: '请输入问题后再发送。' };
+
+        const requestId = ++this.requestSeq;
+        this.abortController?.abort();
+        const controller = new AbortController();
+        this.abortController = controller;
+        const timeout = setTimeout(() => controller.abort(), this.REQUEST_TIMEOUT_MS);
+        const history = this.conversationHistory.slice(-8);
+        const userEntry = { role: 'user', content };
+        const cancelled = () => ({ success: false, cancelled: true, message: '' });
+
         try {
             const response = await fetch(this.API_URL, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
+                signal: controller.signal,
                 body: JSON.stringify({
                     model: this.MODEL,
-                    messages: messages,
+                    messages: [
+                        { role: 'system', content: this.buildSystemPrompt() },
+                        ...history,
+                        userEntry
+                    ],
                     temperature: 0.7,
                     max_tokens: 500
                 })
             });
-            
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                console.error('AI API Error:', response.status, errorData);
-                throw new Error(`API请求失败: ${response.status}`);
-            }
-            
+            if (requestId !== this.requestSeq) return cancelled();
+            if (!response.ok) throw new Error(`API请求失败: ${response.status}`);
             const data = await response.json();
-            
-            if (data.choices && data.choices[0] && data.choices[0].message) {
-                const aiReply = data.choices[0].message.content;
-                
-                // 添加AI回复到历史
-                this.conversationHistory.push({
-                    role: 'assistant',
-                    content: aiReply
-                });
-                
-                return {
-                    success: true,
-                    message: aiReply
-                };
-            } else {
+            if (requestId !== this.requestSeq) return cancelled();
+            const aiReply = data?.choices?.[0]?.message?.content;
+            if (typeof aiReply !== 'string' || !aiReply.trim()) {
                 throw new Error('API返回格式异常');
             }
+            // 只提交完整成功的一轮，失败和旧场景请求不能污染历史。
+            this.conversationHistory = [...history, userEntry, { role: 'assistant', content: aiReply }];
+            return { success: true, message: aiReply };
         } catch (error) {
+            if (requestId !== this.requestSeq) return cancelled();
             console.error('AI Chat Error:', error);
             return {
                 success: false,
-                message: '抱歉，我暂时无法回应。请稍后再试。',
+                message: error.name === 'AbortError' ? '回复超时了，请稍后重试。' : '抱歉，我暂时无法回应。请稍后再试。',
                 error: error.message
             };
+        } finally {
+            clearTimeout(timeout);
+            if (this.abortController === controller) this.abortController = null;
         }
     },
-    
+
     /**
      * 获取场景开场白
      */
@@ -192,6 +181,9 @@ ${scene.intro.objectives ? scene.intro.objectives.map((o, i) => `${i+1}. ${o}`).
      * 清除对话历史
      */
     clearHistory() {
+        this.requestSeq += 1;
+        this.abortController?.abort();
+        this.abortController = null;
         this.conversationHistory = [];
     }
 };

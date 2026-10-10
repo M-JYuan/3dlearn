@@ -35,13 +35,13 @@ window.QuizBank = {
                 { value: 'b-zero', label: 'b = 0' },
                 { value: 'cannot-decide', label: '无法判断' }
             ],
-            correctAnswer: 'b-negative',
+            correctAnswer: 'cannot-decide',
             errorTags: {
                 'b-positive': 'axis-misunderstanding',
                 'b-zero': 'axis-misunderstanding',
-                'cannot-decide': 'formula-connection'
+                'b-negative': 'formula-connection'
             },
-            feedbackTemplate: '利用对称轴公式 x = -b/(2a) 联合 a 的符号再判断 b。'
+            feedbackTemplate: '对称轴 x = -b/(2a) > 0 只能说明 a、b 异号；未给出 a 的符号，无法单独判断 b 的正负。'
         },
         {
             id: 'qf-q3',

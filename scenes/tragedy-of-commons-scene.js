@@ -261,13 +261,20 @@ window.TragedyOfCommonsScene = class TragedyOfCommonsScene {
         const group = new THREE.Group();
 
         // 身体
-        const bodyGeom = new THREE.CapsuleGeometry(0.4, 1, 4, 8);
+        // Three.js r128 has no CapsuleGeometry; keep the rounded body using supported primitives.
+        const bodyGeom = new THREE.CylinderGeometry(0.4, 0.4, 1, 8);
         const bodyMat = new THREE.MeshStandardMaterial({
             color: [0x8b4513, 0x4a5568, 0x2d3748, 0x744210, 0x553c9a][index % 5]
         });
         const body = new THREE.Mesh(bodyGeom, bodyMat);
         body.position.y = 1.2;
         group.add(body);
+        const capGeometry = new THREE.SphereGeometry(0.4, 8, 8);
+        for (const y of [0.7, 1.7]) {
+            const cap = new THREE.Mesh(capGeometry, bodyMat);
+            cap.position.y = y;
+            group.add(cap);
+        }
 
         // 头
         const headGeom = new THREE.SphereGeometry(0.35, 8, 8);

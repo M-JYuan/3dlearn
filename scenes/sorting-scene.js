@@ -22,6 +22,11 @@ class SortingScene {
         
         this.name = 'SortingScene';
         this.mainGroup = null;
+        this.runId = 0;
+        this.disposed = false;
+        this.pendingTasks = new Set();
+        this.guideTimers = new Set();
+        this.guide = null;
         
         // 数据
         this.arraySize = 20;
@@ -188,11 +193,27 @@ class SortingScene {
     /**
      * 创建柱状图
      */
+    releaseRemovedObjects(objects) {
+        const geometries = new Set();
+        const materials = new Set();
+        const textures = new Set();
+        objects.forEach(root => root.traverse(obj => {
+            if (obj.geometry) geometries.add(obj.geometry);
+            const list = Array.isArray(obj.material) ? obj.material : [obj.material];
+            list.filter(Boolean).forEach(material => materials.add(material));
+        }));
+        materials.forEach(material => Object.values(material).forEach(value => {
+            if (value?.isTexture) textures.add(value);
+        }));
+        textures.forEach(texture => texture.dispose());
+        materials.forEach(material => material.dispose());
+        geometries.forEach(geometry => geometry.dispose());
+        objects.forEach(root => this.mainGroup.remove(root));
+    }
+
     createBars() {
         // 清除旧的柱子
-        this.displayBars.forEach(bar => {
-            this.mainGroup.remove(bar);
-        });
+        this.releaseRemovedObjects(this.displayBars);
         this.displayBars = [];
         
         const barWidth = 0.8;
@@ -297,6 +318,8 @@ class SortingScene {
      * 交换两个柱子的位置（动画）
      */
     async swapBars(i, j) {
+        const runId = this.runId;
+        this.assertRun(runId);
         if (i === j) return;
         
         const bar1 = this.displayBars[i];
@@ -311,7 +334,8 @@ class SortingScene {
         
         // 动画交换
         await this.animateSwap(bar1, bar2, pos1, pos2);
-        
+        this.assertRun(runId);
+
         // 更新数组和显示
         [this.displayBars[i], this.displayBars[j]] = [this.displayBars[j], this.displayBars[i]];
         this.displayBars[i].userData.index = i;
@@ -325,57 +349,118 @@ class SortingScene {
      * 交换动画
      */
     animateSwap(bar1, bar2, pos1, pos2) {
-        return new Promise(resolve => {
-            const duration = this.sortSpeed;
-            const startTime = Date.now();
-            const height = 3; // 弧形高度
-            
-            const animate = () => {
-                const elapsed = Date.now() - startTime;
-                const progress = Math.min(elapsed / duration, 1);
-                
-                // 缓动函数
-                const eased = 1 - Math.pow(1 - progress, 3);
-                
-                // 弧形路径
-                const arc = Math.sin(progress * Math.PI) * height;
-                
-                bar1.position.x = pos1 + (pos2 - pos1) * eased;
-                bar1.position.z = arc;
-                
-                bar2.position.x = pos2 + (pos1 - pos2) * eased;
-                bar2.position.z = -arc * 0.5;
-                
-                if (progress < 1) {
-                    requestAnimationFrame(animate);
-                } else {
-                    bar1.position.z = 0;
-                    bar2.position.z = 0;
-                    resolve();
-                }
+        return this.animateOperation(this.sortSpeed, progress => {
+            const eased = 1 - Math.pow(1 - progress, 3);
+            const arc = progress === 1 ? 0 : Math.sin(progress * Math.PI) * 3;
+            bar1.position.x = pos1 + (pos2 - pos1) * eased;
+            bar1.position.z = arc;
+            bar2.position.x = pos2 + (pos1 - pos2) * eased;
+            bar2.position.z = -arc * 0.5;
+        });
+    }
+
+    animateOperation(duration, update) {
+        const runId = this.runId;
+        return new Promise((resolve, reject) => {
+            let frame;
+            let elapsed = 0;
+            let lastTime = Date.now();
+            const cancel = () => {
+                cancelAnimationFrame(frame);
+                this.pendingTasks.delete(cancel);
+                const error = new Error('Scene operation cancelled');
+                error.name = 'AbortError';
+                reject(error);
             };
-            
-            animate();
+            const animate = () => {
+                if (this.disposed || runId !== this.runId) { cancel(); return; }
+                const now = Date.now();
+                if (!this.isPaused) {
+                    elapsed += now - lastTime;
+                    const progress = Math.min(elapsed / Math.max(1, duration), 1);
+                    update(progress);
+                    if (progress === 1) {
+                        this.pendingTasks.delete(cancel);
+                        resolve();
+                        return;
+                    }
+                }
+                lastTime = now;
+                frame = requestAnimationFrame(animate);
+            };
+            this.pendingTasks.add(cancel);
+            frame = requestAnimationFrame(animate);
         });
     }
 
     /**
      * 等待延迟
      */
-    delay(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms || this.sortSpeed));
+    assertRun(runId) {
+        if (this.disposed || runId !== this.runId) {
+            const error = new Error('Scene operation cancelled');
+            error.name = 'AbortError';
+            throw error;
+        }
+    }
+
+    cancelPending() {
+        this.runId += 1;
+        this.isPaused = false;
+        this.pendingTasks.forEach(cancel => cancel());
+        this.pendingTasks.clear();
+        this.guideTimers.forEach(timer => clearTimeout(timer));
+        this.guideTimers.clear();
+        this.guide?.remove();
+        this.guide = null;
+    }
+
+    schedule(callback, ms) {
+        const runId = this.runId;
+        const timer = setTimeout(() => {
+            this.guideTimers.delete(timer);
+            if (!this.disposed && runId === this.runId) callback();
+        }, ms);
+        this.guideTimers.add(timer);
+        return timer;
+    }
+
+    delay(ms = this.sortSpeed) {
+        const runId = this.runId;
+        return new Promise((resolve, reject) => {
+            let timer;
+            const cancel = () => {
+                clearTimeout(timer);
+                this.pendingTasks.delete(cancel);
+                const error = new Error('Scene operation cancelled');
+                error.name = 'AbortError';
+                reject(error);
+            };
+            const finish = () => {
+                if (this.disposed || runId !== this.runId) { cancel(); return; }
+                // Do not resume an algorithm while paused, even if its delay expired.
+                if (this.isPaused) { timer = setTimeout(finish, 30); return; }
+                this.pendingTasks.delete(cancel);
+                resolve();
+            };
+            this.pendingTasks.add(cancel);
+            timer = setTimeout(finish, ms);
+        });
     }
 
     /**
      * 冒泡排序
      */
     async bubbleSort() {
+        const runId = this.runId;
+        this.assertRun(runId);
         const n = this.displayBars.length;
         
         for (let i = 0; i < n - 1; i++) {
             for (let j = 0; j < n - i - 1; j++) {
                 if (!this.isSorting) return;
                 while (this.isPaused) await this.delay(100);
+                this.assertRun(runId);
                 
                 // 比较
                 this.setBarColor(j, 'comparing');
@@ -383,9 +468,11 @@ class SortingScene {
                 this.comparisons++;
                 this.updateStats();
                 await this.delay();
+                this.assertRun(runId);
                 
                 if (this.displayBars[j].userData.value > this.displayBars[j + 1].userData.value) {
                     await this.swapBars(j, j + 1);
+                    this.assertRun(runId);
                 }
                 
                 this.setBarColor(j, 'default');
@@ -400,6 +487,8 @@ class SortingScene {
      * 选择排序
      */
     async selectionSort() {
+        const runId = this.runId;
+        this.assertRun(runId);
         const n = this.displayBars.length;
         
         for (let i = 0; i < n - 1; i++) {
@@ -409,11 +498,13 @@ class SortingScene {
             for (let j = i + 1; j < n; j++) {
                 if (!this.isSorting) return;
                 while (this.isPaused) await this.delay(100);
+                this.assertRun(runId);
                 
                 this.setBarColor(j, 'comparing');
                 this.comparisons++;
                 this.updateStats();
                 await this.delay();
+                this.assertRun(runId);
                 
                 if (this.displayBars[j].userData.value < this.displayBars[minIdx].userData.value) {
                     this.setBarColor(minIdx, 'default');
@@ -426,6 +517,7 @@ class SortingScene {
             
             if (minIdx !== i) {
                 await this.swapBars(i, minIdx);
+                this.assertRun(runId);
             }
             
             this.setBarColor(i, 'sorted');
@@ -437,24 +529,30 @@ class SortingScene {
      * 插入排序
      */
     async insertionSort() {
+        const runId = this.runId;
+        this.assertRun(runId);
         const n = this.displayBars.length;
         
         for (let i = 1; i < n; i++) {
             let j = i;
             this.setBarColor(j, 'selected');
             await this.delay();
+            this.assertRun(runId);
             
             while (j > 0) {
                 if (!this.isSorting) return;
                 while (this.isPaused) await this.delay(100);
+                this.assertRun(runId);
                 
                 this.setBarColor(j - 1, 'comparing');
                 this.comparisons++;
                 this.updateStats();
                 await this.delay();
+                this.assertRun(runId);
                 
                 if (this.displayBars[j].userData.value < this.displayBars[j - 1].userData.value) {
                     await this.swapBars(j, j - 1);
+                    this.assertRun(runId);
                     this.setBarColor(j, 'default');
                     j--;
                 } else {
@@ -476,17 +574,24 @@ class SortingScene {
      * 快速排序
      */
     async quickSort(left = 0, right = this.displayBars.length - 1) {
+        const runId = this.runId;
+        this.assertRun(runId);
         if (left >= right) {
             if (left === right) this.setBarColor(left, 'sorted');
             return;
         }
         
         const pivotIdx = await this.partition(left, right);
+        this.assertRun(runId);
         await this.quickSort(left, pivotIdx - 1);
+        this.assertRun(runId);
         await this.quickSort(pivotIdx + 1, right);
+        this.assertRun(runId);
     }
 
     async partition(left, right) {
+        const runId = this.runId;
+        this.assertRun(runId);
         const pivotValue = this.displayBars[right].userData.value;
         this.setBarColor(right, 'pivot');
         
@@ -495,16 +600,19 @@ class SortingScene {
         for (let j = left; j < right; j++) {
             if (!this.isSorting) return left;
             while (this.isPaused) await this.delay(100);
+            this.assertRun(runId);
             
             this.setBarColor(j, 'comparing');
             this.comparisons++;
             this.updateStats();
             await this.delay();
+            this.assertRun(runId);
             
             if (this.displayBars[j].userData.value < pivotValue) {
                 i++;
                 if (i !== j) {
                     await this.swapBars(i, j);
+                    this.assertRun(runId);
                 }
                 this.setBarColor(i, 'default');
             }
@@ -512,6 +620,7 @@ class SortingScene {
         }
         
         await this.swapBars(i + 1, right);
+        this.assertRun(runId);
         this.setBarColor(i + 1, 'sorted');
         
         return i + 1;
@@ -521,6 +630,8 @@ class SortingScene {
      * 归并排序
      */
     async mergeSort(left = 0, right = this.displayBars.length - 1) {
+        const runId = this.runId;
+        this.assertRun(runId);
         if (left >= right) {
             this.setBarColor(left, 'sorted');
             return;
@@ -533,28 +644,36 @@ class SortingScene {
             this.setBarColor(i, 'comparing');
         }
         await this.delay();
+        this.assertRun(runId);
         for (let i = left; i <= mid; i++) {
             this.setBarColor(i, 'default');
         }
         
         await this.mergeSort(left, mid);
+        this.assertRun(runId);
         await this.mergeSort(mid + 1, right);
+        this.assertRun(runId);
         await this.merge(left, mid, right);
+        this.assertRun(runId);
     }
 
     async merge(left, mid, right) {
+        const runId = this.runId;
+        this.assertRun(runId);
         const temp = [];
         let i = left, j = mid + 1;
         
         while (i <= mid && j <= right) {
             if (!this.isSorting) return;
             while (this.isPaused) await this.delay(100);
+            this.assertRun(runId);
             
             this.setBarColor(i, 'comparing');
             this.setBarColor(j, 'comparing');
             this.comparisons++;
             this.updateStats();
             await this.delay();
+            this.assertRun(runId);
             
             if (this.displayBars[i].userData.value <= this.displayBars[j].userData.value) {
                 temp.push({ bar: this.displayBars[i], value: this.displayBars[i].userData.value });
@@ -582,6 +701,8 @@ class SortingScene {
         const totalWidth = this.arraySize * (barWidth + gap);
         const startX = -totalWidth / 2;
         
+        // Commit the complete permutation before yielding so reset still owns every bar.
+        this.displayBars.splice(left, temp.length, ...temp.map(item => item.bar));
         for (let k = 0; k < temp.length; k++) {
             const targetIdx = left + k;
             const bar = temp[k].bar;
@@ -592,6 +713,7 @@ class SortingScene {
             // 动画移动到新位置
             const targetX = startX + targetIdx * (barWidth + gap);
             await this.animateMove(bar, targetX);
+            this.assertRun(runId);
             this.setBarColor(targetIdx, 'sorted');
         }
     }
@@ -600,26 +722,10 @@ class SortingScene {
      * 移动动画
      */
     animateMove(bar, targetX) {
-        return new Promise(resolve => {
-            const startX = bar.position.x;
-            const duration = this.sortSpeed / 2;
-            const startTime = Date.now();
-            
-            const animate = () => {
-                const elapsed = Date.now() - startTime;
-                const progress = Math.min(elapsed / duration, 1);
-                const eased = 1 - Math.pow(1 - progress, 2);
-                
-                bar.position.x = startX + (targetX - startX) * eased;
-                
-                if (progress < 1) {
-                    requestAnimationFrame(animate);
-                } else {
-                    resolve();
-                }
-            };
-            
-            animate();
+        const startX = bar.position.x;
+        return this.animateOperation(this.sortSpeed / 2, progress => {
+            const eased = 1 - Math.pow(1 - progress, 2);
+            bar.position.x = startX + (targetX - startX) * eased;
         });
     }
 
@@ -627,7 +733,9 @@ class SortingScene {
      * 开始排序
      */
     async startSort() {
-        if (this.isSorting) return;
+        if (this.disposed || this.isSorting) return;
+        this.stopSort();
+        const runId = this.runId;
         
         this.isSorting = true;
         this.isPaused = false;
@@ -641,35 +749,47 @@ class SortingScene {
         const algo = this.algorithms[this.currentAlgorithm];
         this.showGuide(`🚀 开始 ${algo.name}（${algo.complexity}）`);
         
-        switch (this.currentAlgorithm) {
-            case 'bubble':
-                await this.bubbleSort();
-                break;
-            case 'selection':
-                await this.selectionSort();
-                break;
-            case 'insertion':
-                await this.insertionSort();
-                break;
-            case 'quick':
-                await this.quickSort();
-                break;
-            case 'merge':
-                await this.mergeSort();
-                break;
-        }
+        try {
+            switch (this.currentAlgorithm) {
+                case 'bubble':
+                    await this.bubbleSort();
+                    break;
+                case 'selection':
+                    await this.selectionSort();
+                    break;
+                case 'insertion':
+                    await this.insertionSort();
+                    break;
+                case 'quick':
+                    await this.quickSort();
+                    break;
+                case 'merge':
+                    await this.mergeSort();
+                    break;
+            }
         
-        if (this.isSorting) {
-            this.showGuide(`✅ ${algo.name} 完成！比较 ${this.comparisons} 次，交换 ${this.swaps} 次`);
-        }
+            this.assertRun(runId);
+            if (this.isSorting) {
+                this.showGuide(`✅ ${algo.name} 完成！比较 ${this.comparisons} 次，交换 ${this.swaps} 次`);
+            }
         
-        this.isSorting = false;
+        } catch (error) {
+            if (error.name !== 'AbortError') {
+                if (runId === this.runId) this.stopSort();
+                console.error('Sorting failed:', error);
+                this.showGuide('排序中断，请重置后重试。');
+            }
+        } finally {
+            if (runId === this.runId) this.isSorting = false;
+        }
+
     }
 
     /**
      * 暂停/继续
      */
     togglePause() {
+        if (!this.isSorting || this.disposed) return false;
         this.isPaused = !this.isPaused;
         return this.isPaused;
     }
@@ -678,6 +798,9 @@ class SortingScene {
      * 停止排序
      */
     stopSort() {
+        this.cancelPending();
+        const pauseButton = document.getElementById('btn-pause');
+        if (pauseButton) pauseButton.innerHTML = '<i class="fas fa-pause"></i> 暂停';
         this.isSorting = false;
         this.isPaused = false;
     }
@@ -823,7 +946,7 @@ class SortingScene {
         
         document.getElementById('btn-pause')?.addEventListener('click', (e) => {
             const paused = this.togglePause();
-            e.target.innerHTML = paused 
+            e.currentTarget.innerHTML = paused
                 ? '<i class="fas fa-play"></i> 继续' 
                 : '<i class="fas fa-pause"></i> 暂停';
         });
@@ -837,6 +960,7 @@ class SortingScene {
      * 显示引导消息
      */
     showGuide(message) {
+        if (this.disposed) return;
         const container = document.getElementById('view-scene');
         if (!container) return;
         
@@ -844,14 +968,15 @@ class SortingScene {
         if (oldGuide) oldGuide.remove();
         
         const guide = document.createElement('div');
+        this.guide = guide;
         guide.className = 'scene-guide-message';
         guide.innerHTML = message;
         container.appendChild(guide);
         
-        setTimeout(() => guide.classList.add('visible'), 100);
-        setTimeout(() => {
+        this.schedule(() => guide.classList.add('visible'), 100);
+        this.schedule(() => {
             guide.classList.remove('visible');
-            setTimeout(() => guide.remove(), 300);
+            this.schedule(() => guide.remove(), 300);
         }, 3000);
     }
 
@@ -859,7 +984,7 @@ class SortingScene {
      * 开始自动播放
      */
     startAutoPlay() {
-        setTimeout(() => {
+        this.schedule(() => {
             this.showGuide('📊 排序算法可视化：观察不同算法的效率差异！');
         }, 500);
     }
@@ -894,6 +1019,7 @@ class SortingScene {
      * 清理
      */
     dispose() {
+        this.disposed = true;
         this.stopSort();
         
         const panel = document.getElementById('sorting-info-panel');

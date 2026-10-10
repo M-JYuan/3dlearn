@@ -49,6 +49,7 @@ const AvatarTutor = {
     resizeHandler: null,
     ready: false,
     running: false,
+    animationFrameId: null,
 
     init() {
         this.section = document.getElementById('teacher-section');
@@ -67,7 +68,9 @@ const AvatarTutor = {
             this.updateAvatarSwitcher();
             return;
         }
+        const expectedLoadId = this.loadSeq + 1;
         this.load().catch((error) => {
+            if (expectedLoadId !== this.loadSeq) return;
             console.warn('[AvatarTutor] VRM unavailable, keeping 3D loading state:', error);
             this.useFallback(error);
         });
@@ -96,6 +99,7 @@ const AvatarTutor = {
             'VRM runtime modules'
         );
 
+        if (loadId !== this.loadSeq) return;
         const { GLTFLoader } = gltfModule;
         const { VRMLoaderPlugin, VRMUtils } = vrmModule;
 
@@ -128,7 +132,10 @@ const AvatarTutor = {
 
         try {
             const gltf = await this.loadFirstAvailableVrm(loader, this.getVrmUrls(this.activeAvatarIndex));
-            if (loadId !== this.loadSeq) return;
+            if (loadId !== this.loadSeq) {
+                this.disposeObject3D(gltf.scene);
+                return;
+            }
             this.applyLoadedVrm(gltf);
         } finally {
             if (loadId === this.loadSeq) {
@@ -232,7 +239,15 @@ const AvatarTutor = {
         const options = this.getAvatarOptions();
         const nextIndex = Number(index);
         if (!Number.isInteger(nextIndex) || !options[nextIndex]) return;
-        if (nextIndex === this.activeAvatarIndex && this.ready && this.vrm) return;
+        if (nextIndex === this.activeAvatarIndex && this.ready && this.vrm) {
+            // Selecting the visible avatar cancels an in-flight replacement.
+            this.loadSeq += 1;
+            this.loadingAvatarIndex = null;
+            if (this.loading) this.loading.hidden = true;
+            this.updateAvatarSwitcher();
+            return;
+        }
+        if (nextIndex === this.loadingAvatarIndex && this.loader) return;
         if (!this.loader) {
             this.activeAvatarIndex = nextIndex;
             this.loadingAvatarIndex = nextIndex;
@@ -244,7 +259,6 @@ const AvatarTutor = {
         const hasCurrentVrm = Boolean(this.vrm);
         const loadId = ++this.loadSeq;
         this.loadingAvatarIndex = nextIndex;
-        this.detachAudio();
         this.updateAvatarSwitcher();
 
         if (this.stage) this.stage.hidden = false;
@@ -256,7 +270,10 @@ const AvatarTutor = {
 
         try {
             const gltf = await this.loadFirstAvailableVrm(this.loader, this.getVrmUrls(nextIndex));
-            if (loadId !== this.loadSeq) return;
+            if (loadId !== this.loadSeq) {
+                this.disposeObject3D(gltf.scene);
+                return;
+            }
             this.activeAvatarIndex = nextIndex;
             this.applyLoadedVrm(gltf);
         } catch (error) {
@@ -288,7 +305,17 @@ const AvatarTutor = {
                         : '3D\u8001\u5e08\u52a0\u8f7d\u4e2d';
                 }
                 const timeoutMs = this.getVrmTimeoutMs(url);
-                return await this.withTimeout(loader.loadAsync(url), `teacher VRM model: ${url}`, timeoutMs);
+                let abandoned = false;
+                const pending = loader.loadAsync(url).then((gltf) => {
+                    if (abandoned) this.disposeObject3D(gltf.scene);
+                    return gltf;
+                });
+                try {
+                    return await this.withTimeout(pending, `teacher VRM model: ${url}`, timeoutMs);
+                } catch (error) {
+                    abandoned = true;
+                    throw error;
+                }
             } catch (error) {
                 lastError = error;
                 console.warn(`[AvatarTutor] VRM candidate failed: ${url}`, error);
@@ -326,19 +353,33 @@ const AvatarTutor = {
     },
 
     applyLoadedVrm(gltf) {
-        this.VRMUtils?.removeUnnecessaryVertices?.(gltf.scene);
-        this.VRMUtils?.removeUnnecessaryJoints?.(gltf.scene);
-
-        const nextVrm = gltf.userData.vrm;
-        if (!nextVrm) throw new Error('Loaded file does not contain VRM data');
-
-        this.clearCurrentVrm();
-        this.vrm = nextVrm;
-        this.vrm.scene.rotation.y = this.getAvatarProfile().rotationY;
-        this.vrm.scene.position.set(0, 0, 0);
-        this.scene.add(this.vrm.scene);
-        this.frameVrm();
-        this.applyRestingPose(0);
+        const previousVrm = this.vrm;
+        const previousBaseY = this.vrmBaseY;
+        const nextVrm = gltf.userData?.vrm;
+        try {
+            if (!nextVrm) throw new Error('Loaded file does not contain VRM data');
+            this.VRMUtils?.removeUnnecessaryVertices?.(gltf.scene);
+            this.VRMUtils?.removeUnnecessaryJoints?.(gltf.scene);
+            this.vrm = nextVrm;
+            nextVrm.scene.rotation.y = this.getAvatarProfile().rotationY;
+            nextVrm.scene.position.set(0, 0, 0);
+            this.scene.add(nextVrm.scene);
+            this.frameVrm();
+            this.applyRestingPose(0);
+        } catch (error) {
+            this.scene?.remove?.(nextVrm?.scene || gltf.scene);
+            this.disposeObject3D(gltf.scene);
+            this.vrm = previousVrm;
+            this.vrmBaseY = previousBaseY;
+            throw error;
+        }
+        // Keep the previous model intact until the replacement is fully prepared.
+        if (previousVrm?.scene && previousVrm !== nextVrm) {
+            this.scene.remove(previousVrm.scene);
+            this.disposeObject3D(previousVrm.scene);
+        }
+        this.mouthOpen = 0;
+        this.targetMouthOpen = 0;
 
         if (this.fallbackAvatar) this.fallbackAvatar.hidden = true;
         if (this.stage) this.stage.hidden = false;
@@ -457,73 +498,30 @@ const AvatarTutor = {
         window.dispatchEvent?.(new EventClass('avatar-tutor-ready'));
     },
 
-    ensureFallbackAvatar(error) {
-        if (this.fallbackAvatar || !this.stage) return;
-
-        const root = document.createElement('div');
-        root.className = 'teacher-avatar-fallback';
-        root.style.setProperty('--avatar-mouth', '0.000');
-        root.style.setProperty('--avatar-mouth-scale', '0.250');
-        root.style.setProperty('--avatar-eye-scale', '1.000');
-        root.style.setProperty('--avatar-breath', '0.000');
-
-        const figure = document.createElement('div');
-        figure.className = 'teacher-avatar-fallback-figure';
-
-        const glow = document.createElement('div');
-        glow.className = 'teacher-avatar-fallback-glow';
-
-        const head = document.createElement('div');
-        head.className = 'teacher-avatar-fallback-head';
-
-        const hair = document.createElement('div');
-        hair.className = 'teacher-avatar-fallback-hair';
-
-        const face = document.createElement('div');
-        face.className = 'teacher-avatar-fallback-face';
-
-        const leftEye = document.createElement('div');
-        leftEye.className = 'teacher-avatar-fallback-eye left';
-
-        const rightEye = document.createElement('div');
-        rightEye.className = 'teacher-avatar-fallback-eye right';
-
-        const mouth = document.createElement('div');
-        mouth.className = 'teacher-avatar-fallback-mouth';
-
-        const torso = document.createElement('div');
-        torso.className = 'teacher-avatar-fallback-torso';
-
-        const collar = document.createElement('div');
-        collar.className = 'teacher-avatar-fallback-collar';
-
-        const note = document.createElement('div');
-        note.className = 'teacher-avatar-fallback-note';
-        const errorMessage = String(error?.message || '');
-        note.textContent = /teacher\.vrm|404|Not Found/i.test(errorMessage)
-            ? '\u672a\u627e\u5230 VRM: assets/teacher.vrm'
-            : '\u5185\u7f6e 3D \u8001\u5e08';
-
-        face.appendChild(leftEye);
-        face.appendChild(rightEye);
-        face.appendChild(mouth);
-        head.appendChild(hair);
-        head.appendChild(face);
-        torso.appendChild(collar);
-        figure.appendChild(glow);
-        figure.appendChild(head);
-        figure.appendChild(torso);
-        root.appendChild(figure);
-        root.appendChild(note);
-        this.stage.appendChild(root);
-
-        this.fallbackAvatar = root;
+    ensureFallbackAvatar() {
+        // The bundled VRM is the only teacher; keep loading/error UI if it is unavailable.
+        return null;
     },
 
     disable() {
+        this.loadSeq += 1;
+        this.loadingAvatarIndex = null;
+        this.updateAvatarSwitcher();
+        if (this.animationFrameId != null && typeof cancelAnimationFrame === 'function') {
+            cancelAnimationFrame(this.animationFrameId);
+        }
+        this.animationFrameId = null;
         this.ready = false;
         this.running = false;
         this.detachAudio();
+        this.clearCurrentVrm();
+        this.renderer?.dispose?.();
+        this.renderer = null;
+        this.loader = null;
+        if (this.resizeHandler) window.removeEventListener?.('resize', this.resizeHandler);
+        this.resizeHandler = null;
+        this.audioContext?.close?.()?.catch?.(() => {});
+        this.audioContext = null;
         if (this.section) {
             this.section.classList.remove('teacher-avatar-ready', 'teacher-avatar-fallback-ready', 'teacher-avatar-loading-only');
         }
@@ -612,7 +610,7 @@ const AvatarTutor = {
 
     animate() {
         if (!this.running) return;
-        requestAnimationFrame(() => this.animate());
+        this.animationFrameId = requestAnimationFrame(() => this.animate());
 
         const delta = Math.min(this.clock?.getDelta?.() || 0.016, 0.05);
         const elapsed = this.clock?.elapsedTime || ((Date.now() - this.fallbackStartedAt) / 1000);

@@ -270,3 +270,56 @@ for (const moduleFile of ['voice-tutor.js', 'voice-tutor-live.js']) {
         assert.equal(attachCallIndex < detachCallIndex, true);
     });
 }
+test('stopping queued speech prevents replay on a later user gesture', async () => {
+    const { VoiceTutor, calls, dispatchWindowEvent } = await loadVoiceTutor('voice-tutor-live.js', { rejectAudioPlayTimes: 1 });
+    await VoiceTutor.speak('queued text');
+    assert.ok(VoiceTutor.pendingSpeechBlob);
+    VoiceTutor.stop();
+    dispatchWindowEvent('pointerdown');
+    assert.equal(VoiceTutor.pendingSpeechBlob, null);
+    assert.equal(calls.filter(([name]) => name === 'audio.play').length, 1);
+});
+
+test('stopping active playback settles its pending promise', async () => {
+    const { VoiceTutor } = await loadVoiceTutor('voice-tutor-live.js');
+    let settled = false;
+    const pending = VoiceTutor.playBlob(new Blob(['audio']), 0, 'text').then(() => { settled = true; });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    VoiceTutor.stop();
+    await Promise.resolve();
+    assert.equal(settled, true);
+    await pending;
+});
+
+test('thinking discards autoplay retries from the previous response', async () => {
+    const { VoiceTutor, calls, dispatchWindowEvent } = await loadVoiceTutor('voice-tutor-live.js', { rejectAudioPlayTimes: 1 });
+    await VoiceTutor.speak('previous text');
+    VoiceTutor.setThinking();
+    dispatchWindowEvent('pointerdown');
+    assert.equal(VoiceTutor.pendingSpeechBlob, null);
+    assert.equal(VoiceTutor.state, 'thinking');
+    assert.equal(calls.filter(([name]) => name === 'audio.play').length, 1);
+});
+
+test('stopping from onAudioReady prevents the cancelled audio from starting', async () => {
+    const { VoiceTutor, calls } = await loadVoiceTutor('voice-tutor-live.js');
+    await VoiceTutor.speak('cancel before playback', { onAudioReady: () => VoiceTutor.stop() });
+    assert.equal(calls.some(([name]) => name === 'audio.play'), false);
+    assert.equal(VoiceTutor.state, 'idle');
+});
+
+test('an empty speech request stops active playback', async () => {
+    const { VoiceTutor } = await loadVoiceTutor('voice-tutor-live.js');
+    const pending = VoiceTutor.playBlob(new Blob(['audio']), 0, 'text');
+    await VoiceTutor.speak('  ');
+    assert.equal(VoiceTutor.audio, null);
+    assert.equal(VoiceTutor.state, 'idle');
+    await pending;
+});
+
+test('TTS fetch failures hide the stop control', async () => {
+    const { VoiceTutor } = await loadVoiceTutor('voice-tutor-live.js', { rejectFetch: true });
+    await VoiceTutor.speak('text');
+    assert.equal(VoiceTutor.stopBtn.hidden, true);
+    assert.equal(VoiceTutor.state, 'error');
+});

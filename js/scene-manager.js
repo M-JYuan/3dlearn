@@ -26,6 +26,15 @@ class SceneManager {
         
         // 当前悬停对象
         this.hoveredObject = null;
+        this.selectedObject = null;
+        this.currentNavigationTool = 'select';
+        this.pointerStart = null;
+        this.pointerDragged = false;
+        this.wireframeMaterials = new Map();
+        this.hiddenGrids = new Map();
+        this.wireframeEnabled = false;
+        this.gridsHidden = false;
+        this.lastViewportUpdate = -Infinity;
         
         // Gizmo相关
         this.gizmoRenderer = null;
@@ -37,11 +46,15 @@ class SceneManager {
         this.clickHandler = this.onClick.bind(this);
         this.hoverHandler = this.onHover.bind(this);
         this.mouseLeaveHandler = this.onMouseLeave.bind(this);
+        this.pointerDownHandler = this.onPointerDown.bind(this);
+        this.pointerMoveHandler = this.onPointerMove.bind(this);
 
         window.addEventListener('resize', this.resizeHandler);
         this.container.addEventListener('click', this.clickHandler);
         this.container.addEventListener('mousemove', this.hoverHandler);
         this.container.addEventListener('mouseleave', this.mouseLeaveHandler);
+        this.container.addEventListener('pointerdown', this.pointerDownHandler);
+        this.container.addEventListener('pointermove', this.pointerMoveHandler);
         
         // 创建提示框和Blender UI
         this.createTooltip();
@@ -110,9 +123,9 @@ class SceneManager {
         tools.className = 'viewport-tools';
         tools.innerHTML = `
             <button class="tool-btn active" title="选择" data-tool="select"><i class="fas fa-mouse-pointer"></i></button>
-            <button class="tool-btn" title="移动" data-tool="move"><i class="fas fa-arrows-alt"></i></button>
-            <button class="tool-btn" title="旋转" data-tool="rotate"><i class="fas fa-sync-alt"></i></button>
-            <button class="tool-btn" title="缩放" data-tool="scale"><i class="fas fa-expand-arrows-alt"></i></button>
+            <button class="tool-btn" title="平移视角" data-tool="move"><i class="fas fa-arrows-alt"></i></button>
+            <button class="tool-btn" title="旋转视角" data-tool="rotate"><i class="fas fa-sync-alt"></i></button>
+            <button class="tool-btn" title="缩放视角" data-tool="scale"><i class="fas fa-expand-arrows-alt"></i></button>
             <div class="tool-divider"></div>
             <button class="tool-btn" title="重置视角" id="tool-reset-view"><i class="fas fa-home"></i></button>
             <button class="tool-btn" title="聚焦选中" id="tool-focus"><i class="fas fa-crosshairs"></i></button>
@@ -126,6 +139,10 @@ class SceneManager {
         document.getElementById('tool-reset-view').onclick = () => this.resetToDefaultView();
         document.getElementById('tool-wireframe').onclick = (e) => this.toggleWireframe(e.currentTarget);
         document.getElementById('tool-grid').onclick = (e) => this.toggleGrid(e.currentTarget);
+        document.getElementById('tool-focus').onclick = () => this.focusSelection();
+        tools.querySelectorAll('[data-tool]').forEach(btn => {
+            btn.onclick = () => this.setNavigationTool(btn.dataset.tool);
+        });
         
         // 坐标轴指示器容器
         const gizmo = document.createElement('div');
@@ -231,7 +248,7 @@ class SceneManager {
     /**
      * 更新状态栏信息
      */
-    updateViewportInfo() {
+    updateViewportInfo(delta = 0) {
         if (!this.camera) return;
         
         // 相机位置
@@ -250,10 +267,21 @@ class SceneManager {
         // FPS
         const fpsEl = document.getElementById('stat-fps');
         if (fpsEl) {
-            const delta = this.clock.getDelta();
             const fps = delta > 0 ? Math.round(1 / delta) : 60;
             fpsEl.textContent = Math.min(fps, 120);
         }
+
+        let objects = 0;
+        let vertices = 0;
+        this.scene?.traverse(object => {
+            if (!object.isMesh) return;
+            objects += 1;
+            vertices += object.geometry?.attributes?.position?.count || 0;
+        });
+        const objectCount = document.getElementById('stat-objects');
+        const vertexCount = document.getElementById('stat-vertices');
+        if (objectCount) objectCount.textContent = objects;
+        if (vertexCount) vertexCount.textContent = vertices;
     }
     
     /**
@@ -302,13 +330,107 @@ class SceneManager {
     }
     
     toggleWireframe(btn) {
-        btn.classList.toggle('active');
-        // 切换线框模式逻辑
+        this.wireframeEnabled = !this.wireframeEnabled;
+        btn.classList.toggle('active', this.wireframeEnabled);
+        if (this.wireframeEnabled) {
+            this.applyDisplayOverrides();
+        } else {
+            this.wireframeMaterials.forEach((value, material) => { material.wireframe = value; });
+            this.wireframeMaterials.clear();
+        }
     }
     
     toggleGrid(btn) {
-        btn.classList.toggle('active');
-        // 切换网格显示逻辑
+        this.gridsHidden = !this.gridsHidden;
+        btn.classList.toggle('active', this.gridsHidden);
+        if (this.gridsHidden) {
+            this.applyDisplayOverrides();
+        } else {
+            this.hiddenGrids.forEach((value, grid) => { grid.visible = value; });
+            this.hiddenGrids.clear();
+        }
+    }
+
+    applyDisplayOverrides() {
+        if (!this.wireframeEnabled && !this.gridsHidden) return;
+        const currentMaterials = new Set();
+        const currentGrids = new Set();
+        this.scene?.traverse(object => {
+            if (this.gridsHidden && object.type === 'GridHelper') {
+                currentGrids.add(object);
+                if (!this.hiddenGrids.has(object)) this.hiddenGrids.set(object, object.visible);
+                object.visible = false;
+            }
+            if (!this.wireframeEnabled || !object.isMesh) return;
+            const materials = Array.isArray(object.material) ? object.material : [object.material];
+            materials.forEach(material => {
+                if (!material || !('wireframe' in material)) return;
+                currentMaterials.add(material);
+                if (!this.wireframeMaterials.has(material)) {
+                    this.wireframeMaterials.set(material, material.wireframe);
+                }
+                material.wireframe = true;
+            });
+        });
+        // Simulations replace particles and meshes frequently; do not retain their old resources.
+        this.wireframeMaterials.forEach((value, material) => {
+            if (currentMaterials.has(material)) return;
+            material.wireframe = value;
+            this.wireframeMaterials.delete(material);
+        });
+        this.hiddenGrids.forEach((value, grid) => {
+            if (currentGrids.has(grid)) return;
+            grid.visible = value;
+            this.hiddenGrids.delete(grid);
+        });
+    }
+
+    setNavigationTool(tool = 'select') {
+        if (!this.controls || !['select', 'move', 'rotate', 'scale'].includes(tool)) return;
+        this.currentNavigationTool = tool;
+        this.controls.mouseButtons.LEFT = tool === 'move' ? THREE.MOUSE.PAN
+            : tool === 'scale' ? THREE.MOUSE.DOLLY : THREE.MOUSE.ROTATE;
+        // OrbitControls supports touch zoom as a two-finger gesture only.
+        this.controls.touches.ONE = tool === 'move' ? THREE.TOUCH.PAN
+            : tool === 'scale' ? null : THREE.TOUCH.ROTATE;
+        document.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tool === tool);
+        });
+        const hint = document.querySelector('.viewport-footer .hint');
+        if (hint) {
+            hint.textContent = tool === 'move' ? '拖动平移 · 滚轮缩放'
+                : tool === 'scale' ? '鼠标拖动缩放 · 触屏双指缩放'
+                : '拖动旋转 · 滚轮缩放 · 右键平移';
+        }
+    }
+
+    focusSelection() {
+        if (!this.camera || !this.controls || !this.currentSceneInstance) return;
+        // If nothing is selected, fit the teaching model as a whole.
+        if (this.selectedObject) {
+            let parent = this.selectedObject;
+            while (parent && parent !== this.scene) parent = parent.parent;
+            if (!parent) this.selectedObject = null;
+        }
+        const target = this.selectedObject || this.currentSceneInstance.mainGroup || this.scene;
+        const box = new THREE.Box3().setFromObject(target);
+        if (box.isEmpty()) return;
+        const center = box.getCenter(new THREE.Vector3());
+        const radius = box.getSize(new THREE.Vector3()).length() / 2;
+        if (!Number.isFinite(radius)) return;
+        const verticalFov = this.camera.fov * Math.PI / 180;
+        const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * this.camera.aspect);
+        const distance = Math.min(this.controls.maxDistance, Math.max(this.controls.minDistance,
+            radius / Math.sin(Math.min(verticalFov, horizontalFov) / 2) * 1.15));
+        const direction = this.camera.position.clone().sub(this.controls.target);
+        if (direction.lengthSq() === 0) direction.set(0, 0, 1);
+        if (typeof gsap !== 'undefined') {
+            gsap.killTweensOf(this.camera.position);
+            gsap.killTweensOf(this.controls.target);
+        }
+        this.camera.position.copy(center).add(direction.normalize().multiplyScalar(distance));
+        this.controls.target.copy(center);
+        this.controls.update();
     }
 
     /**
@@ -317,7 +439,9 @@ class SceneManager {
     init() {
         // 创建渲染器
         this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-        this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+        const width = Math.max(this.container.clientWidth, 1);
+        const height = Math.max(this.container.clientHeight, 1);
+        this.renderer.setSize(width, height);
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -327,12 +451,13 @@ class SceneManager {
         this.scene = new THREE.Scene();
         
         // 创建相机
-        const aspect = this.container.clientWidth / this.container.clientHeight;
+        const aspect = width / height;
         this.camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 1000);
         this.camera.position.set(0, 10, 30);
 
         // 控制器 - 确保所有控制功能启用
         this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
+        this.syncCameraTarget();
         this.controls.enableDamping = true;
         this.controls.dampingFactor = 0.08;
         this.controls.enableZoom = true;
@@ -358,6 +483,18 @@ class SceneManager {
 
         // 启动循环
         this.animate();
+    }
+
+    syncCameraTarget() {
+        // Scene modules use camera.lookAt() for their teaching views. OrbitControls
+        // otherwise replaces that view with its previous target on the next frame.
+        const controls = this.controls;
+        const lookAt = this.camera.lookAt;
+        this.camera.lookAt = function (x, y, z) {
+            lookAt.call(this, x, y, z);
+            if (x?.isVector3) controls.target.copy(x);
+            else controls.target.set(x, y, z);
+        };
     }
 
     setupDefaultLights() {
@@ -404,6 +541,11 @@ class SceneManager {
             if (this.currentSceneInstance.getInteractables) {
                 this.interactableObjects = this.currentSceneInstance.getInteractables();
             }
+
+            const sceneControls = document.getElementById('scene-controls');
+            if (sceneControls) {
+                sceneControls.style.display = sceneControls.children.length ? 'flex' : 'none';
+            }
             
             // 显示初始教学引导
             this.showInitialGuides();
@@ -411,6 +553,8 @@ class SceneManager {
             console.log('Scene loaded successfully:', SceneClass.name || 'Unknown');
         } catch (e) {
             console.error('Failed to load scene:', e);
+            this.resetToEmptyScene();
+            throw e;
         }
     }
 
@@ -418,8 +562,47 @@ class SceneManager {
      * 清理当前场景
      */
     clearScene() {
-        if (this.currentSceneInstance && this.currentSceneInstance.dispose) {
-            this.currentSceneInstance.dispose();
+        if (typeof gsap !== 'undefined') {
+            if (this.camera) gsap.killTweensOf(this.camera.position);
+            if (this.controls) gsap.killTweensOf(this.controls.target);
+        }
+        // Restore borrowed material properties before scene-owned cleanup runs.
+        this.wireframeMaterials.forEach((value, material) => { material.wireframe = value; });
+        this.hiddenGrids.forEach((value, grid) => { grid.visible = value; });
+        this.wireframeMaterials.clear();
+        this.hiddenGrids.clear();
+        this.wireframeEnabled = false;
+        this.gridsHidden = false;
+        document.getElementById('tool-wireframe')?.classList.remove('active');
+        document.getElementById('tool-grid')?.classList.remove('active');
+        this.setNavigationTool('select');
+
+        // Capture resources before scene.dispose() detaches its groups. Some older
+        // scenes only remove their meshes, which does not release their GPU data.
+        const resources = this.collectSceneResources();
+        const alreadyDisposed = new Set();
+        const recordDisposal = event => alreadyDisposed.add(event.target);
+        resources.forEach(resource => resource.addEventListener?.('dispose', recordDisposal));
+        try {
+            if (this.currentSceneInstance?.dispose) {
+                this.currentSceneInstance.dispose();
+            }
+        } catch (error) {
+            console.warn('Scene cleanup failed:', error);
+        } finally {
+            resources.forEach(resource => {
+                resource.removeEventListener?.('dispose', recordDisposal);
+                if (alreadyDisposed.has(resource)) return;
+                try { resource.dispose(); } catch (error) {
+                    console.warn('Scene resource cleanup failed:', error);
+                }
+            });
+            this.scene?.clear?.();
+            if (this.scene) {
+                this.scene.background = null;
+                this.scene.environment = null;
+            }
+            this.renderer?.renderLists?.dispose();
         }
 
         // 取消尚未触发的初始引导定时器，并移除已弹出的引导提示
@@ -440,6 +623,9 @@ class SceneManager {
         this.interactableObjects = [];
         this.currentSceneInstance = null;
         this.hoveredObject = null;
+        this.selectedObject = null;
+        this.pointerStart = null;
+        this.pointerDragged = false;
 
         this.hideTooltip();
 
@@ -451,6 +637,39 @@ class SceneManager {
             controlsDiv.style.display = 'none';
             controlsDiv.innerHTML = '';
         }
+    }
+
+    collectSceneResources() {
+        const resources = new Set();
+        const track = resource => {
+            if (typeof resource?.dispose === 'function') resources.add(resource);
+        };
+        const trackTexture = value => {
+            if (Array.isArray(value)) value.forEach(trackTexture);
+            else if (value?.isTexture) track(value);
+        };
+        trackTexture(this.scene?.background);
+        trackTexture(this.scene?.environment);
+        this.scene?.traverse(object => {
+            track(object.geometry);
+            track(object.shadow?.map);
+            track(object.shadow?.mapPass);
+            const materials = Array.isArray(object.material) ? object.material : [object.material];
+            materials.filter(Boolean).forEach(material => {
+                track(material);
+                Object.values(material).forEach(trackTexture);
+                Object.values(material.uniforms || {}).forEach(uniform => trackTexture(uniform?.value));
+                if (typeof gsap !== 'undefined') {
+                    [material, material.color, material.emissive, material.uniforms].filter(Boolean)
+                        .forEach(target => gsap.killTweensOf(target));
+                }
+            });
+            if (typeof gsap !== 'undefined') {
+                [object, object.position, object.rotation, object.scale, object.quaternion].filter(Boolean)
+                    .forEach(target => gsap.killTweensOf(target));
+            }
+        });
+        return resources;
     }
 
     /**
@@ -487,6 +706,7 @@ class SceneManager {
         if (this.currentSceneInstance && this.currentSceneInstance.animate) {
             this.currentSceneInstance.animate(time, delta);
         }
+        this.applyDisplayOverrides();
 
         if (this.renderer && this.scene && this.camera) {
             this.renderer.render(this.scene, this.camera);
@@ -497,9 +717,10 @@ class SceneManager {
         // 更新Blender UI
         this.updateGizmo();
         
-        // 每30帧更新一次状态栏（优化性能）
-        if (Math.floor(time * 60) % 30 === 0) {
-            this.updateViewportInfo();
+        // 每半秒更新一次状态栏（不再次读取时钟，避免扰动动画 delta）
+        if (time - this.lastViewportUpdate >= 0.5) {
+            this.lastViewportUpdate = time;
+            this.updateViewportInfo(delta);
         }
     }
 
@@ -536,6 +757,7 @@ class SceneManager {
         
         const w = this.container.clientWidth;
         const h = this.container.clientHeight;
+        if (w <= 0 || h <= 0) return;
         const tempV = new THREE.Vector3();
 
         this.labels.forEach(l => {
@@ -560,6 +782,7 @@ class SceneManager {
         if (!this.renderer || !this.camera) return;
         const w = this.container.clientWidth;
         const h = this.container.clientHeight;
+        if (w <= 0 || h <= 0) return;
         this.renderer.setSize(w, h);
         this.camera.aspect = w / h;
         this.camera.updateProjectionMatrix();
@@ -572,8 +795,23 @@ class SceneManager {
         this.onResize();
     }
 
+    onPointerDown(event) {
+        this.pointerStart = { x: event.clientX, y: event.clientY };
+        this.pointerDragged = false;
+    }
+
+    onPointerMove(event) {
+        if (!this.pointerStart) return;
+        if (Math.hypot(event.clientX - this.pointerStart.x, event.clientY - this.pointerStart.y) > 5) {
+            this.pointerDragged = true;
+        }
+    }
+
     onClick(event) {
+        if (this.currentNavigationTool !== 'select' || this.pointerDragged) return;
+        this.refreshInteractables();
         if (!this.currentSceneInstance || this.interactableObjects.length === 0) return;
+        if (event.target && event.target !== this.renderer?.domElement) return;
 
         const rect = this.container.getBoundingClientRect();
         this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -581,17 +819,21 @@ class SceneManager {
 
         this.raycaster.setFromCamera(this.mouse, this.camera);
         const intersects = this.raycaster.intersectObjects(this.interactableObjects, true);
+        const hit = this.findVisibleIntersection(intersects);
 
-        if (intersects.length > 0) {
-            let target = intersects[0].object;
+        if (hit) {
+            let target = hit.object;
+            this.selectedObject = target;
             while(target) {
                 if (target.userData && target.userData.onClick) {
+                    this.selectedObject = target;
                     target.userData.onClick(target);
                     break;
                 }
                 target = target.parent;
             }
         } else {
+            this.selectedObject = null;
             if (this.currentSceneInstance.onBackgroundClick) {
                 this.currentSceneInstance.onBackgroundClick();
             }
@@ -602,8 +844,14 @@ class SceneManager {
      * 悬停事件 - 显示提示框
      */
     onHover(event) {
+        if (this.currentNavigationTool !== 'select' ||
+            (event.target && event.target !== this.renderer?.domElement)) {
+            this.onMouseLeave();
+            return;
+        }
+        this.refreshInteractables();
         if (!this.currentSceneInstance || this.interactableObjects.length === 0) {
-            this.hideTooltip();
+            this.onMouseLeave();
             return;
         }
          
@@ -613,9 +861,10 @@ class SceneManager {
         
         this.raycaster.setFromCamera(this.mouse, this.camera);
         const intersects = this.raycaster.intersectObjects(this.interactableObjects, true);
+        const hit = this.findVisibleIntersection(intersects);
         
-        if (intersects.length > 0) {
-            let target = intersects[0].object;
+        if (hit) {
+            let target = hit.object;
             // 向上查找有 hoverTitle 或 onClick 的对象
             while(target) {
                 if (target.userData && (target.userData.hoverTitle || target.userData.onClick)) {
@@ -642,12 +891,34 @@ class SceneManager {
         this.container.style.cursor = 'default';
     }
 
+    refreshInteractables() {
+        if (this.currentSceneInstance?.getInteractables) {
+            this.interactableObjects = this.currentSceneInstance.getInteractables() || [];
+        }
+    }
+
+    findVisibleIntersection(intersections) {
+        return intersections.find(hit => {
+            const materials = hit.object.material;
+            const material = Array.isArray(materials) ? materials[hit.face?.materialIndex || 0] : materials;
+            if (material?.visible === false) return false;
+            let object = hit.object;
+            while (object) {
+                if (object.visible === false) return false;
+                if (object === this.scene) return true;
+                object = object.parent;
+            }
+            return false; // Detached models can remain in old scene-owned pick lists.
+        });
+    }
+
     /**
      * 鼠标离开容器
      */
     onMouseLeave() {
         this.hideTooltip();
         this.hoveredObject = null;
+        this.container.style.cursor = 'default';
     }
 
     /**

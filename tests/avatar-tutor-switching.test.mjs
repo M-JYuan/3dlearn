@@ -435,3 +435,86 @@ test('AvatarTutor gives large local VRM models enough time to parse', async () =
 
 
 
+
+async function switchingTutor() {
+    const { AvatarTutor: tutor } = await loadAvatarTutor({ window: { TEACHER_VRM_OPTIONS: [{ url: 'a.vrm' }, { url: 'b.vrm' }] } });
+    tutor.loader = {};
+    tutor.vrm = { scene: { name: 'current' } };
+    tutor.ready = true;
+    tutor.loading = { hidden: true };
+    return tutor;
+}
+
+test('disabling an avatar prevents pending loads from reviving it and disposes late models', async () => {
+    const tutor = await switchingTutor();
+    let finish;
+    const disposed = [];
+    tutor.loadFirstAvailableVrm = () => new Promise(resolve => { finish = resolve; });
+    tutor.disposeObject3D = scene => disposed.push(scene);
+    tutor.applyLoadedVrm = () => assert.fail('disabled avatar must not become visible');
+    const current = tutor.vrm.scene;
+    const pending = tutor.switchAvatar(1);
+    tutor.disable();
+    const late = { name: 'late' };
+    finish({ scene: late });
+    await pending;
+    assert.equal(tutor.ready, false);
+    assert.equal(tutor.vrm, null);
+    assert.deepEqual(disposed, [current, late]);
+});
+
+test('selecting the visible avatar cancels a pending replacement', async () => {
+    const tutor = await switchingTutor();
+    let finish;
+    let discarded;
+    tutor.loadFirstAvailableVrm = () => new Promise(resolve => { finish = resolve; });
+    tutor.disposeObject3D = scene => { discarded = scene; };
+    tutor.applyLoadedVrm = () => assert.fail('cancelled replacement must not apply');
+    const pending = tutor.switchAvatar(1);
+    await tutor.switchAvatar(0);
+    const late = {};
+    finish({ scene: late });
+    await pending;
+    assert.equal(discarded, late);
+    assert.equal(tutor.activeAvatarIndex, 0);
+    assert.equal(tutor.loadingAvatarIndex, null);
+    assert.equal(tutor.loading.hidden, true);
+});
+
+test('switching avatar does not disconnect the currently playing audio graph', async () => {
+    const tutor = await switchingTutor();
+    tutor.detachAudio = () => assert.fail('switching geometry must not mute audio');
+    tutor.loadFirstAvailableVrm = async () => ({ scene: {} });
+    tutor.applyLoadedVrm = () => {};
+    await tutor.switchAvatar(1);
+    assert.equal(tutor.activeAvatarIndex, 1);
+});
+
+test('models resolving after a candidate timeout are disposed', async () => {
+    const { AvatarTutor: tutor } = await loadAvatarTutor({ console: { warn() {} } });
+    let finish;
+    const discarded = [];
+    tutor.getVrmTimeoutMs = () => 1;
+    tutor.disposeObject3D = scene => discarded.push(scene);
+    const loader = { loadAsync: () => new Promise(resolve => { finish = resolve; }) };
+    await assert.rejects(tutor.loadFirstAvailableVrm(loader, ['slow.vrm']), /timed out/);
+    const late = {};
+    finish({ scene: late });
+    await Promise.resolve();
+    assert.deepEqual(discarded, [late]);
+});
+
+test('a replacement that fails during framing leaves the previous model intact', async () => {
+    const tutor = await switchingTutor();
+    const previous = tutor.vrm;
+    const replacement = { rotation: {}, position: { set() {} } };
+    const removed = [];
+    const disposed = [];
+    tutor.scene = { add() {}, remove(scene) { removed.push(scene); } };
+    tutor.disposeObject3D = scene => disposed.push(scene);
+    tutor.frameVrm = () => { throw new Error('invalid bounds'); };
+    assert.throws(() => tutor.applyLoadedVrm({ scene: replacement, userData: { vrm: { scene: replacement } } }), /invalid bounds/);
+    assert.equal(tutor.vrm, previous);
+    assert.deepEqual(removed, [replacement]);
+    assert.deepEqual(disposed, [replacement]);
+});

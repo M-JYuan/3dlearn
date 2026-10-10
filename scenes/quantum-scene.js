@@ -14,6 +14,9 @@ window.QuantumScene = class QuantumScene {
         this.renderer = renderer;
 
         this.mainGroup = null;
+        this.disposed = false;
+        this.timers = new Set();
+        this.guide = null;
         this.interactables = [];
         this.highlighted = null;
         
@@ -653,24 +656,46 @@ window.QuantumScene = class QuantumScene {
         this.camera.lookAt(0, 0, -5);
     }
     
+    schedule(callback, delay) {
+        if (this.disposed) return;
+        const timer = setTimeout(() => {
+            this.timers.delete(timer);
+            if (!this.disposed) callback();
+        }, delay);
+        this.timers.add(timer);
+        return timer;
+    }
+
+    cancelScheduled() {
+        this.timers.forEach(timer => clearTimeout(timer));
+        this.timers.clear();
+        this.isAutoPlaying = false;
+        this.guide?.remove();
+        this.guide = null;
+    }
+
     runWaveExperiment() {
+        if (this.disposed) return;
+        this.cancelScheduled();
+        gsap.killTweensOf(this.observerRay.material);
         // 波动实验：不观测，显示干涉条纹
-        if (this.params.isObserved) {
-            this.params.isObserved = false;
-            gsap.to(this.observerRay.material, { opacity: 0, duration: 0.5 });
-        }
+        this.params.isObserved = false;
+        gsap.to(this.observerRay.material, { opacity: 0, duration: 0.5 });
         
         this.clearScreen();
         this.showExperimentGuide('🌊 波动实验：电子同时通过两条狭缝');
         
         // 绘制干涉条纹
-        setTimeout(() => {
+        this.schedule(() => {
             this.drawInterferencePattern();
             this.showExperimentGuide('✨ 出现干涉条纹！电子表现出波动性');
         }, 1500);
     }
     
     runObserveExperiment() {
+        if (this.disposed) return;
+        this.cancelScheduled();
+        gsap.killTweensOf(this.observerRay.material);
         // 观测实验：观测时干涉消失
         this.params.isObserved = true;
         gsap.to(this.observerRay.material, { opacity: 0.6, duration: 0.5 });
@@ -678,7 +703,7 @@ window.QuantumScene = class QuantumScene {
         this.clearScreen();
         this.showExperimentGuide('👁️ 观测实验：探测电子通过哪条狭缝');
         
-        setTimeout(() => {
+        this.schedule(() => {
             this.drawParticlePattern();
             this.showExperimentGuide('❓ 干涉条纹消失！电子表现出粒子性');
         }, 1500);
@@ -689,6 +714,9 @@ window.QuantumScene = class QuantumScene {
     }
     
     resetExperiment() {
+        if (this.disposed) return;
+        this.cancelScheduled();
+        gsap.killTweensOf(this.observerRay.material);
         this.params.isObserved = false;
         gsap.to(this.observerRay.material, { opacity: 0, duration: 0.3 });
         this.clearScreen();
@@ -696,27 +724,31 @@ window.QuantumScene = class QuantumScene {
     }
     
     showExperimentGuide(message) {
+        if (this.disposed) return;
         const container = document.getElementById('scene-canvas-container');
         const old = container.querySelector('.scene-guide-message');
         if (old) old.remove();
         
         const guide = document.createElement('div');
+        this.guide = guide;
         guide.className = 'scene-guide-message';
         guide.innerHTML = message;
         container.appendChild(guide);
         
-        setTimeout(() => guide.classList.add('visible'), 100);
-        setTimeout(() => {
+        this.schedule(() => guide.classList.add('visible'), 100);
+        this.schedule(() => {
             guide.classList.remove('visible');
-            setTimeout(() => guide.remove(), 300);
+            this.schedule(() => guide.remove(), 300);
         }, 4000);
     }
     
     // 开始自动播放
     startAutoPlay() {
+        if (this.disposed) return;
+        this.cancelScheduled();
         this.isAutoPlaying = true;
         // 自动运行波动实验演示
-        setTimeout(() => {
+        this.schedule(() => {
             if (this.isAutoPlaying) {
                 this.runWaveExperiment();
             }
@@ -785,6 +817,8 @@ window.QuantumScene = class QuantumScene {
     }
 
     dispose() {
+        this.disposed = true;
+        this.cancelScheduled();
         if (this.mainGroup) this.scene.remove(this.mainGroup);
     }
 

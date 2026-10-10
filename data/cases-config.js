@@ -154,46 +154,6 @@ window.CasesConfig = {
             }
         },
         {
-            id: 'cell',
-            title: '动物细胞结构',
-            keywords: ['细胞', '动物细胞', '细胞核', '线粒体', '内质网', '高尔基体'],
-            type: 'scene',
-            sceneClass: 'CellScene',
-            icon: 'fa-microscope',
-            description: '细胞器结构与功能可视化',
-            difficulty: 2,
-            intro: {
-                subtitle: '细胞器协作与生命活动',
-                objectives: [
-                    '识别主要细胞器的结构',
-                    '理解细胞器的分工协作',
-                    '建立细胞是“生命基本单位”的概念'
-                ],
-                keyPoints: ['细胞膜', '细胞核', '线粒体', '内质网', '高尔基体'],
-                tips: '点击细胞器查看功能说明，使用分解视图观察结构'
-            }
-        },
-        {
-            id: 'dna',
-            title: 'DNA双螺旋结构',
-            keywords: ['DNA', '双螺旋', '碱基配对', '遗传', '核酸', '基因'],
-            type: 'scene',
-            sceneClass: 'DNAScene',
-            icon: 'fa-dna',
-            description: '遗传信息的双螺旋可视化',
-            difficulty: 3,
-            intro: {
-                subtitle: '遗传密码与碱基配对',
-                objectives: [
-                    '理解双螺旋结构的基本特征',
-                    '掌握碱基配对规则 A-T、G-C',
-                    '认识DNA复制与遗传信息传递'
-                ],
-                keyPoints: ['双螺旋', '碱基配对', '氢键', '遗传信息'],
-                tips: '切换高亮 A-T 或 G-C，观察氢键数差异'
-            }
-        },
-        {
             id: 'vector3d',
             title: '三维向量与运算',
             keywords: ['向量', '三维', '空间向量', '点积', '叉积', '平行四边形'],
@@ -272,26 +232,6 @@ window.CasesConfig = {
                 ],
                 keyPoints: ['8人围圈', '周期=8', '余数定位置', '循环规律'],
                 tips: '点击"题目1"或"题目2"查看完整解题过程！'
-            }
-        },
-        {
-            id: 'flagellar',
-            title: '细菌鞭毛马达',
-            keywords: ['鞭毛', '细菌', '马达', '纳米', '分子机器', '生物马达', 'flagellar', '鞭毛马达'],
-            type: 'scene',
-            sceneClass: 'FlagellarScene',
-            icon: 'fa-bacterium',
-            description: '自然界最精密的纳米分子机器',
-            difficulty: 3,
-            intro: {
-                subtitle: '探秘细菌的"发动机"',
-                objectives: [
-                    '了解鞭毛马达的多层结构组成',
-                    '理解质子动力驱动原理',
-                    '认识自然界纳米机器的精密设计'
-                ],
-                keyPoints: ['C环', 'MS环', '定子/转子', 'L环P环', '质子动力'],
-                tips: '点击各部件了解详情，观察质子流动如何驱动旋转！'
             }
         },
         {
@@ -401,27 +341,6 @@ window.CasesConfig = {
             }
         },
         {
-            id: 'photosynthesis',
-            title: '光合作用与呼吸作用',
-            keywords: ['光合作用', '呼吸作用', '叶绿体', '线粒体', 'ATP', '葡萄糖', '碳循环', '氧气', '二氧化碳', '能量'],
-            type: 'scene',
-            sceneClass: 'PhotosynthesisScene',
-            icon: 'fa-leaf',
-            description: '植物和动物的能量交换可视化',
-            difficulty: 3,
-            intro: {
-                subtitle: '生命能量的奇妙转化',
-                objectives: [
-                    '理解光合作用的光反应与暗反应',
-                    '观察叶绿体和线粒体的内部结构',
-                    '掌握ATP作为能量货币的作用',
-                    '认识碳-氧循环的生态意义'
-                ],
-                keyPoints: ['6CO₂+6H₂O→C₆H₁₂O₆+6O₂', '叶绿体类囊体', '线粒体嵴', 'ATP合成', '碳循环'],
-                tips: '按步骤学习，点击叶绿体和线粒体了解内部结构，观察分子的流动！'
-            }
-        },
-        {
             id: 'maze',
             title: '迷宫寻路算法',
             keywords: ['迷宫', '寻路', 'A*', 'BFS', 'DFS', '路径', '导航', '算法', '右手法则', '水淹'],
@@ -482,27 +401,6 @@ window.CasesConfig = {
                 ],
                 keyPoints: ['冒泡O(n²)', '选择O(n²)', '插入O(n²)', '快排O(n log n)', '归并O(n log n)'],
                 tips: '选择不同算法，点击开始观察柱状图变化，比较效率差异！'
-            }
-        },
-        {
-            id: 'neuronsignal',
-            title: '神经元信号传递',
-            keywords: ['神经元', '神经', '信号', '突触', '轴突', '树突', '动作电位', '神经递质', '脑', '脑电'],
-            type: 'scene',
-            sceneClass: 'NeuronSignalScene',
-            icon: 'fa-brain',
-            description: '电信号如何在神经网络中传播',
-            difficulty: 3,
-            intro: {
-                subtitle: '探索大脑的"电话线"',
-                objectives: [
-                    '认识神经元的结构：树突、胞体、轴突、突触',
-                    '理解动作电位的产生与传导',
-                    '观察突触传递与神经递质释放',
-                    '了解与AI神经网络的类比'
-                ],
-                keyPoints: ['树突接收', '胞体整合', '轴突传导', '突触传递', '神经递质'],
-                tips: '点击神经元各部分了解详情，观看动作电位如何沿轴突传导！'
             }
         },
         {
@@ -671,27 +569,6 @@ window.CasesConfig = {
                 ],
                 keyPoints: ['复数迭代', '自相似性', '无限细节', '朱利亚集', '配色'],
                 tips: '点击预设位置，探索分形的不同区域！'
-            }
-        },
-        {
-            id: 'sir-model',
-            title: '病毒传播SIR模型',
-            keywords: ['传染病', '病毒', 'SIR', '疫情', '传播', '隔离', '疫苗', 'R0', '拉平曲线'],
-            type: 'scene',
-            sceneClass: 'SIRModelScene',
-            icon: 'fa-virus',
-            description: '理解"拉平曲线"的意义',
-            difficulty: 2,
-            intro: {
-                subtitle: '传染病动力学模拟',
-                objectives: [
-                    '理解SIR模型的三种状态',
-                    '认识R₀（基本传染数）的意义',
-                    '观察防控措施如何改变曲线',
-                    '体会"拉平曲线"的公共卫生意义'
-                ],
-                keyPoints: ['易感者S', '感染者I', '康复者R', 'R₀', '社交距离', '疫苗'],
-                tips: '尝试启用防控措施，观察曲线如何变化！'
             }
         },
         {
@@ -886,7 +763,7 @@ window.CasesConfig = {
         {
             id: 'game-of-life',
             title: '生命游戏',
-            keywords: ['生命游戏', 'game of life', '元胞自动机', 'Conway', '细胞', '涌现', '滑翔机', '自动机'],
+            keywords: ['生命游戏', 'game of life', '元胞自动机', 'Conway', '涌现', '滑翔机', '自动机'],
             type: 'scene',
             sceneClass: 'GameOfLifeScene',
             icon: 'fa-th',
@@ -1073,6 +950,466 @@ window.CasesConfig = {
             }
         },
         {
+            id: 'grade7-cell-mount',
+            title: '观察植物和动物细胞',
+            keywords: ['细胞', '洋葱内表皮', '黑藻', '人口腔', '盖玻片', '装片', '七年级细胞'],
+            type: 'scene',
+            sceneClass: 'Grade7CellMountScene',
+            icon: 'fa-microscope',
+            description: '薄而透明的材料才能看清细胞',
+            difficulty: 1,
+            intro: {
+                subtitle: '七年级：制作并观察临时装片',
+                objectives: [
+                    '知道整片叶子太厚，光线穿不过去',
+                    '比较洋葱内表皮、黑藻叶片和人口腔上皮细胞',
+                    '练习一侧先接触液滴放下盖玻片'
+                ],
+                keyPoints: ['细胞壁', '细胞膜', '细胞质', '细胞核', '线粒体', '液泡', '叶绿体', 'DNA'],
+                tips: '叶绿体只在绿色部分。碘液只让洋葱内表皮的核更清楚。'
+            }
+        },
+        {
+            id: 'grade7-microscope',
+            title: '练习使用显微镜',
+            keywords: ['显微镜', '目镜', '物镜', '粗准焦', '细准焦', '高倍镜'],
+            type: 'scene',
+            sceneClass: 'Grade7MicroscopeScene',
+            icon: 'fa-search',
+            description: '放大倍数是目镜和物镜的乘积',
+            difficulty: 1,
+            intro: {
+                subtitle: '七年级：单目和双目显微镜的调焦',
+                objectives: [
+                    '用目镜倍数乘物镜倍数读出放大倍数',
+                    '高倍镜下看到的细胞更大、更少',
+                    '下降镜筒或上升载物台时先从侧面看'
+                ],
+                keyPoints: ['10×目镜', '4× 10× 40×', '粗准焦螺旋', '细准焦螺旋'],
+                tips: '换成高倍物镜后，粗准焦螺旋停用，只转细准焦螺旋。'
+            }
+        },
+        {
+            id: 'grade7-life-test',
+            title: '生物有哪些特征',
+            keywords: ['生石花', '钟乳石', '含羞草', '生物特征', '七年级生物'],
+            type: 'scene',
+            sceneClass: 'Grade7LifeTestScene',
+            icon: 'fa-leaf',
+            description: '一次只测一项生命特征',
+            difficulty: 1,
+            intro: {
+                subtitle: '七年级：用五项特征辨认生物',
+                objectives: [
+                    '逐项判断是否由细胞构成、需要营养、排出废物、对刺激作出反应、生长和繁殖',
+                    '区分钟乳石变长和生物生长',
+                    '知道病毒是生物，但没有细胞，也不能独立完成生命活动'
+                ],
+                keyPoints: ['细胞', '营养', '废物', '刺激', '繁殖', '病毒'],
+                tips: '机器人能移动，但不是由细胞构成的，也不取食、不繁殖。'
+            }
+        },
+        {
+            id: 'grade7-dolly',
+            title: '多莉为什么像B羊',
+            keywords: ['多莉', '克隆羊', '乳腺细胞', '去核卵', '代孕'],
+            type: 'scene',
+            sceneClass: 'Grade7DollyScene',
+            icon: 'fa-paw',
+            description: '完整乳腺细胞与去核卵细胞融合',
+            difficulty: 2,
+            intro: {
+                subtitle: '七年级：细胞核里有指导发育的信息',
+                objectives: [
+                    '分清A羊的去核卵细胞、B羊的完整乳腺细胞和C羊的代孕',
+                    '看到融合的是完整细胞，不是单独注射细胞核',
+                    '知道多莉长得像B羊'
+                ],
+                keyPoints: ['去核卵细胞', '完整乳腺细胞', '代孕', '遗传信息'],
+                tips: '遗传信息的结构怎样、怎样起作用，以后再学。'
+            }
+        },
+        {
+            id: 'grade7-division',
+            title: '细胞怎样分成两个',
+            keywords: ['细胞分裂', '染色体', '缢缩', '根尖', '新细胞壁'],
+            type: 'scene',
+            sceneClass: 'Grade7DivisionScene',
+            icon: 'fa-clone',
+            description: '染色体复制后再分成两组',
+            difficulty: 1,
+            intro: {
+                subtitle: '七年级：植物细胞和动物细胞的分裂',
+                objectives: [
+                    '按复制、分成两组、形成两个细胞核、细胞质分开的顺序观察',
+                    '比较植物细胞长出新壁和动物细胞膜向内缢缩',
+                    '知道新细胞的染色体与亲代细胞相同'
+                ],
+                keyPoints: ['染色体', '细胞核', '细胞壁', '细胞膜'],
+                tips: '这里不讲分裂期的名称。'
+            }
+        },
+        {
+            id: 'grade7-paramecium',
+            title: '草履虫的趋性',
+            keywords: ['草履虫', '肉汁', '食盐', '棉花纤维', '纤毛'],
+            type: 'scene',
+            sceneClass: 'Grade7ParameciumScene',
+            icon: 'fa-water',
+            description: '远离食盐，游向肉汁',
+            difficulty: 1,
+            intro: {
+                subtitle: '七年级：两滴培养液之间的窄通道',
+                objectives: [
+                    '看草履虫怎样离开左滴边缘的小盐粒',
+                    '看它们怎样游向右滴边缘的肉汁',
+                    '前方碰到棉花纤维时后退并转向'
+                ],
+                keyPoints: ['纤毛', '口沟', '食物泡', '表膜', '伸缩泡'],
+                tips: '盐粒太大或放在中央时，课本没有给出结果。草履虫没有神经。'
+            }
+        },
+        {
+            id: 'grade7-seed',
+            title: '菜豆、玉米和孢子',
+            keywords: ['菜豆', '玉米粒', '胚乳', '子叶', '孢子'],
+            type: 'scene',
+            sceneClass: 'Grade7SeedScene',
+            icon: 'fa-seedling',
+            description: '菜豆没有胚乳，玉米粒其实是果实',
+            difficulty: 1,
+            intro: {
+                subtitle: '七年级：种子的结构和孢子的差别',
+                objectives: [
+                    '认出菜豆的种皮、两片子叶、胚芽、胚轴和胚根',
+                    '知道玉米粒的果皮和种皮长在一起，碘液可检测子叶或胚乳中的淀粉',
+                    '比较种子与孢子的结构，认识萌发需要适宜条件，耐受性因种类而异'
+                ],
+                keyPoints: ['胚', '子叶', '胚乳', '孢子', '淀粉'],
+                tips: '胚是胚芽、胚轴、胚根和子叶。胚乳不是胚。'
+            }
+        },
+        {
+            id: 'grade7-fish-gill',
+            title: '鱼怎样用鳃呼吸',
+            keywords: ['鳃丝', '鳃盖', '鱼鳍', '侧线', '鲫鱼'],
+            type: 'scene',
+            sceneClass: 'Grade7FishGillScene',
+            icon: 'fa-fish',
+            description: '水从口入，从鳃盖后缘流出',
+            difficulty: 1,
+            intro: {
+                subtitle: '七年级：鳃丝与水流',
+                objectives: [
+                    '看口和鳃盖交替开合',
+                    '用墨水看水经过鳃',
+                    '观察离开水面后鳃丝粘成一团、游动停止'
+                ],
+                keyPoints: ['鳃丝', '鳃盖', '胸鳍', '尾鳍', '侧线'],
+                tips: '水中的氧进入血液，二氧化碳随水排出。这里不讲鱼的繁殖。'
+            }
+        },
+        {
+            id: 'grade7-classify',
+            title: '尝试把生物分类',
+            keywords: ['油松', '葫芦藓', '分类等级', '犬属', '七年级分类'],
+            type: 'scene',
+            sceneClass: 'Grade7ClassifyScene',
+            icon: 'fa-sitemap',
+            description: '从有没有种子，到狼的分类等级',
+            difficulty: 2,
+            intro: {
+                subtitle: '七年级：植物、动物和从种到界',
+                objectives: [
+                    '按有没有种子、花和果实、子叶和叶脉给植物分格',
+                    '按有没有脊柱给动物分格',
+                    '按从种到界的顺序看狼的分类'
+                ],
+                keyPoints: ['裸子', '被子', '单子叶', '双子叶', '脊柱', '种'],
+                tips: '种是分类的基本单位。葫芦藓没有真正的根、茎、叶。'
+            }
+        },
+        {
+            id: 'grade7-campus',
+            title: '观察周边的生物',
+            keywords: ['毛白杨', '垂柳', '光叶子花', '三角梅', '校园观察'],
+            type: 'scene',
+            sceneClass: 'Grade7CampusScene',
+            icon: 'fa-binoculars',
+            description: '有目的地比较植物的形态和生活环境',
+            difficulty: 1,
+            intro: {
+                subtitle: '七年级：观察要有目的、有计划',
+                objectives: [
+                    '从树干、枝条、叶、花和生活环境比较毛白杨和垂柳',
+                    '看光叶子花时，先别认定紫色部分就是花瓣',
+                    '记录观察目的，不破坏植物'
+                ],
+                keyPoints: ['观察', '比较', '形态', '生活环境'],
+                tips: '画面是示意图，不能代替到校园里去看。'
+            }
+        },
+        {
+            id: 'grade7-cell-life',
+            title: '细胞的生活',
+            keywords: ['能量转换器', '细胞膜控制', '细胞的生活', '分泌物', '光合作用', '叶绿体', '线粒体', '细胞核', 'DNA'],
+            type: 'scene',
+            sceneClass: 'Grade7CellLifeScene',
+            icon: 'fa-bolt',
+            description: '物质进出、能量转换和细胞核',
+            difficulty: 1,
+            intro: {
+                subtitle: '七年级：细胞膜、叶绿体、线粒体和细胞核',
+                objectives: [
+                    '看需要的物质进入，有些物质被挡住，废物和分泌物排出',
+                    '区分叶绿体贮存能量和线粒体释放能量',
+                    '知道遗传信息主要在细胞核里'
+                ],
+                keyPoints: ['细胞膜', '叶绿体', '线粒体', '细胞核', 'DNA'],
+                tips: '能量不会凭空产生。DNA 的结构以后再学。'
+            }
+        },
+        {
+            id: 'grade7-animal-levels',
+            title: '动物体的结构层次',
+            keywords: ['上皮组织', '结缔组织', '消化系统', '结构层次'],
+            type: 'scene',
+            sceneClass: 'Grade7AnimalLevelsScene',
+            icon: 'fa-user',
+            description: '细胞、组织、器官、系统、个体',
+            difficulty: 2,
+            intro: {
+                subtitle: '七年级：人体的四种基本组织',
+                objectives: [
+                    '认出上皮、肌肉、结缔和神经四种组织',
+                    '看胃怎样由几种组织按次序构成',
+                    '知道系统既有分工又互相配合'
+                ],
+                keyPoints: ['组织', '器官', '系统', '个体'],
+                tips: '绿色开花植物没有“系统”这一层。'
+            }
+        },
+        {
+            id: 'grade7-plant-levels',
+            title: '植物体的结构层次',
+            keywords: ['分生组织', '输导组织', '筛管', '油菜', '六大器官'],
+            type: 'scene',
+            sceneClass: 'Grade7PlantLevelsScene',
+            icon: 'fa-spa',
+            description: '六大器官和五种组织',
+            difficulty: 2,
+            intro: {
+                subtitle: '七年级：绿色开花植物没有系统',
+                objectives: [
+                    '指出根、茎、叶、花、果实、种子',
+                    '区分分生、保护、机械、输导和薄壁组织',
+                    '知道藕是茎，树皮里的筛管不能大面积切断'
+                ],
+                keyPoints: ['营养器官', '生殖器官', '导管', '筛管', '分生组织'],
+                tips: '掐去顶端，是去掉了那里能不断分裂的分生组织。'
+            }
+        },
+        {
+            id: 'grade7-plant-groups',
+            title: '藻类、苔藓、蕨类和种子植物',
+            keywords: ['水绵', '葫芦藓', '肾蕨', '裸子植物', '被子植物'],
+            type: 'scene',
+            sceneClass: 'Grade7PlantGroupsScene',
+            icon: 'fa-tree',
+            description: '从没有根茎叶，到种子包在果实里',
+            difficulty: 2,
+            intro: {
+                subtitle: '七年级：植物类群的主要差别',
+                objectives: [
+                    '说明藻类没有根、茎、叶的分化',
+                    '区别葫芦藓的假根和肾蕨真正的根、茎、叶',
+                    '知道松的球果不是果实，水稻的种子在果实里'
+                ],
+                keyPoints: ['孢子', '假根', '输导组织', '裸子植物', '被子植物'],
+                tips: '孢子只有一个细胞，离开温暖潮湿很快失去生命力。'
+            }
+        },
+        {
+            id: 'grade7-invertebrate',
+            title: '无脊椎动物',
+            keywords: ['刺胞动物', '涡虫', '蛔虫', '节肢动物', '软体动物', '海星'],
+            type: 'scene',
+            sceneClass: 'Grade7InvertebrateScene',
+            icon: 'fa-bug',
+            description: '水螅、涡虫、蛔虫、蚯蚓、蝗虫、蜗牛和海星',
+            difficulty: 2,
+            intro: {
+                subtitle: '七年级：体内没有脊柱的动物',
+                objectives: [
+                    '用刺细胞、体形、分节和外骨骼区分主要类群',
+                    '比较辐射对称和两侧对称',
+                    '知道软体动物大多有贝壳，棘皮动物生活在海里'
+                ],
+                keyPoints: ['刺胞动物', '扁形动物', '线虫动物', '环节动物', '节肢动物'],
+                tips: '蝗虫的外骨骼要蜕掉，身体才能长大。'
+            }
+        },
+        {
+            id: 'grade7-amphibian',
+            title: '两栖动物和爬行动物',
+            keywords: ['两栖动物', '蝌蚪', '蜥蜴', '扬子鳄', '蟾蜍'],
+            type: 'scene',
+            sceneClass: 'Grade7AmphibianScene',
+            icon: 'fa-frog',
+            description: '幼体用鳃，成体用肺；爬行动物真正适应陆地',
+            difficulty: 2,
+            intro: {
+                subtitle: '七年级：青蛙和蜥蜴为什么不是同一类',
+                objectives: [
+                    '看蝌蚪的尾和鳃怎样变成成蛙的四肢和肺',
+                    '知道青蛙皮肤可以辅助呼吸，蜥蜴主要靠肺',
+                    '思考蛇没有四肢为什么仍可能是爬行动物'
+                ],
+                keyPoints: ['鳃', '肺', '皮肤', '陆地卵'],
+                tips: '判断爬行动物，不看它有没有四肢。'
+            }
+        },
+        {
+            id: 'grade7-bird-mammal',
+            title: '鸟和哺乳动物',
+            keywords: ['气囊', '恒温动物', '胎生', '门齿', '犬齿'],
+            type: 'scene',
+            sceneClass: 'Grade7BirdMammalScene',
+            icon: 'fa-dove',
+            description: '羽毛、气囊、体毛、胎生和牙齿分化',
+            difficulty: 2,
+            intro: {
+                subtitle: '七年级：恒定体温的两类脊椎动物',
+                objectives: [
+                    '看鸟的翼、喙和气囊怎样帮助飞行和呼吸',
+                    '比较兔和狼的牙齿',
+                    '知道鲸的毛少了，仍然是哺乳动物'
+                ],
+                keyPoints: ['气囊', '恒温', '胎生', '哺乳', '牙齿分化'],
+                tips: '鱼、两栖动物和爬行动物的体温会随环境改变。'
+            }
+        },
+        {
+            id: 'grade7-cell-model',
+            title: '制作细胞模型',
+            keywords: ['细胞模型', '彩泥', '科学性', '临时装片模型'],
+            type: 'scene',
+            sceneClass: 'Grade7CellModelScene',
+            icon: 'fa-cubes',
+            description: '只拼这册书要求的细胞结构',
+            difficulty: 1,
+            intro: {
+                subtitle: '七年级综合实践：细胞模型',
+                objectives: [
+                    '按动物细胞、非绿色植物细胞或绿色植物细胞来拼',
+                    '叶绿体只放进绿色细胞',
+                    '用科学性检查模型是否完整'
+                ],
+                keyPoints: ['细胞壁', '叶绿体', '液泡', '线粒体', '细胞核'],
+                tips: '这册书不要求内质网、高尔基体和核糖体。'
+            }
+        },
+        {
+            id: 'grade7-microbe-lab',
+            title: '检测细菌和真菌',
+            keywords: ['菌落', '培养基', '高温灭菌', '无菌棉签', '琼脂'],
+            type: 'scene',
+            sceneClass: 'Grade7MicrobeLabScene',
+            icon: 'fa-vial',
+            description: '灭菌、接种，并用一个不打开的皿作对照',
+            difficulty: 2,
+            intro: {
+                subtitle: '七年级：微生物分布在哪里',
+                objectives: [
+                    '按配制、灭菌、冷却、接种、培养的顺序操作',
+                    '比较细菌菌落和霉菌菌落的样子',
+                    '看到跳过灭菌后对照皿也会长菌'
+                ],
+                keyPoints: ['菌落', '琼脂', '接种', '对照'],
+                tips: '培养物不能摸、不能尝。结束时再次灭菌。'
+            }
+        },
+        {
+            id: 'grade7-bacteria',
+            title: '细菌',
+            keywords: ['细菌', '球菌', '杆菌', '螺旋菌', '芽孢', '原核生物', '鞭毛'],
+            type: 'scene',
+            sceneClass: 'Grade7BacteriaScene',
+            icon: 'fa-bacterium',
+            description: '没有成形的细胞核，靠分裂生殖',
+            difficulty: 2,
+            intro: {
+                subtitle: '七年级：细菌的形态、结构和生殖',
+                objectives: [
+                    '认出球菌、杆菌和螺旋菌',
+                    '指出细胞壁、细胞膜、细胞质和 DNA 区域',
+                    '分清芽孢是休眠，分裂才是生殖'
+                ],
+                keyPoints: ['细胞壁', 'DNA', '荚膜', '鞭毛', '芽孢', '分裂'],
+                tips: '大多数细菌不能进行光合作用。荚膜和鞭毛不是每种都有。'
+            }
+        },
+        {
+            id: 'grade7-fungus',
+            title: '真菌',
+            keywords: ['酵母菌', '青霉', '气生菌丝', '出芽生殖', '木耳'],
+            type: 'scene',
+            sceneClass: 'Grade7FungusScene',
+            icon: 'fa-seedling',
+            description: '酵母出芽，青霉用菌丝吸收有机物',
+            difficulty: 2,
+            intro: {
+                subtitle: '七年级：有成形细胞核的真菌',
+                objectives: [
+                    '看酵母菌出芽，并用碘液染出细胞核',
+                    '区分气生菌丝和营养菌丝',
+                    '戴好手套、口罩和护目镜再打开培养皿'
+                ],
+                keyPoints: ['细胞壁', '细胞核', '菌丝', '孢子', '真核生物'],
+                tips: '真菌没有叶绿体。看完青霉要灭菌，不能品尝。'
+            }
+        },
+        {
+            id: 'grade7-virus',
+            title: '病毒没有细胞结构',
+            keywords: ['病毒', '噬菌体', '烟草花叶', '蛋白质外壳', '动物病毒'],
+            type: 'scene',
+            sceneClass: 'Grade7VirusScene',
+            icon: 'fa-virus',
+            description: '蛋白质外壳加内部的遗传物质',
+            difficulty: 2,
+            intro: {
+                subtitle: '七年级：病毒必须寄生在活细胞里',
+                objectives: [
+                    '比较动物病毒、植物病毒和噬菌体',
+                    '看到细胞外的病毒颗粒不能继续活动',
+                    '知道它利用宿主细胞里的物质制造新病毒'
+                ],
+                keyPoints: ['蛋白质外壳', '遗传物质', '寄生', '活细胞'],
+                tips: '病毒比细胞小得多，大小用纳米表示。这里不给具体数字。'
+            }
+        },
+        {
+            id: 'grade7-ferment',
+            title: '制作发酵食品',
+            keywords: ['发酵食品', '酸奶', '泡菜', '馒头', '乳酸菌'],
+            type: 'scene',
+            sceneClass: 'Grade7FermentScene',
+            icon: 'fa-bread-slice',
+            description: '乳酸菌和酵母菌在盖严的容器里工作',
+            difficulty: 1,
+            intro: {
+                subtitle: '七年级综合实践：发酵食品',
+                objectives: [
+                    '看乳酸菌怎样把牛奶和蔬菜变成酸奶、泡菜',
+                    '看酵母菌产生的气体怎样使面团胀起',
+                    '确认老师或家长允许之后才品尝'
+                ],
+                keyPoints: ['乳酸菌', '酵母菌', '二氧化碳', '密闭'],
+                tips: '未知培养皿和发霉的橘子都不是可以品尝的食物。'
+            }
+        },
+        {
             id: 'ppt',
             title: '注意力机制课件',
             keywords: ['ppt', '原理', '课件', '幻灯片', '讲解'],
@@ -1090,16 +1427,20 @@ window.CasesConfig = {
      */
     matchCase(text) {
         const lowerText = text.toLowerCase();
-        
+        let best = null;
+        let bestLen = 0;
+
         for (const c of this.CASES) {
             for (const kw of c.keywords) {
-                if (lowerText.includes(kw.toLowerCase())) {
-                    return c;
+                const key = kw.toLowerCase();
+                if (key && lowerText.includes(key) && key.length > bestLen) {
+                    best = c;
+                    bestLen = key.length;
                 }
             }
         }
-        
-        return null;
+
+        return best;
     },
 
     /**

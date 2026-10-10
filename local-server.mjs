@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, realpath } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,6 +27,8 @@ const MIME_TYPES = new Map([
     ['.mp3', 'audio/mpeg'],
     ['.wav', 'audio/wav']
 ]);
+const PUBLIC_DIRS = new Set(['assets', 'css', 'data', 'js', 'scenes']);
+const PUBLIC_EXTENSIONS = new Set([...MIME_TYPES.keys(), '.vrm', '.glb', '.gltf', '.bin', '.webp', '.ico', '.woff', '.woff2']);
 
 export function cleanTtsText(input) {
     return String(input || '')
@@ -42,7 +44,7 @@ export function loadEnvText(text) {
         const line = rawLine.trim();
         if (!line || line.startsWith('#')) continue;
 
-        const envMatch = line.match(/^(VOLCANO_TTS_[A-Z_]+|ZHIPU_API_KEY)\s*=\s*(.+)$/);
+        const envMatch = line.match(/^(VOLCANO_TTS_[A-Z_]+|ZHIPU_API_KEY|AI_CHAT_BASE_URL|AI_CHAT_API_KEY|AI_CHAT_MODEL)\s*=\s*(.+)$/);
         if (envMatch) {
             values[envMatch[1]] = stripValue(envMatch[2]);
             continue;
@@ -165,9 +167,66 @@ async function getLocalConfig(options = {}) {
         : GUIDE_FILE;
     const dotEnvValues = envFilePath ? await readOptionalEnvFile(envFilePath) : {};
     const guideValues = guideFilePath ? await readOptionalEnvFile(guideFilePath) : {};
+    const merged = { ...dotEnvValues, ...envValues };
     return {
-        volcano: pickVolcanoConfig({ ...dotEnvValues, ...envValues }, guideValues),
-        zhipuApiKey: envValues.ZHIPU_API_KEY || dotEnvValues.ZHIPU_API_KEY || ''
+        volcano: pickVolcanoConfig(merged, guideValues),
+        chat: resolveChatUpstream(merged)
+    };
+}
+
+export function chatCompletionsUrl(baseUrl) {
+    const url = new URL(String(baseUrl || '').trim());
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+        throw new Error('AI chat base URL must use http or https');
+    }
+    if (url.username || url.password) throw new Error('AI chat base URL must not include credentials');
+    const pathName = url.pathname.replace(/\/+$/, '');
+    url.pathname = /\/chat\/completions$/i.test(pathName) ? pathName : `${pathName}/chat/completions`;
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+}
+
+export function resolveChatUpstream(env = {}) {
+    const baseUrl = String(env.AI_CHAT_BASE_URL || '').trim();
+    const apiKey = String(env.AI_CHAT_API_KEY || '').trim();
+    const model = String(env.AI_CHAT_MODEL || '').trim();
+    if (baseUrl || apiKey || model) {
+        if (!baseUrl || !apiKey || !model) {
+            return { error: 'AI_CHAT_BASE_URL, AI_CHAT_API_KEY, and AI_CHAT_MODEL must be set together.' };
+        }
+        return { source: 'relay', apiKey, model, url: chatCompletionsUrl(baseUrl) };
+    }
+    const zhipuApiKey = String(env.ZHIPU_API_KEY || '').trim();
+    if (!zhipuApiKey) return null;
+    return { source: 'zhipu', apiKey: zhipuApiKey, model: 'glm-4-flash', url: ZHIPU_API_URL };
+}
+
+function sanitizeChatPayload(payload, model) {
+    const messages = Array.isArray(payload?.messages) ? payload.messages : null;
+    if (!messages) return { error: 'messages is required' };
+    const system = [];
+    const rest = [];
+    for (const message of messages) {
+        if (!message || typeof message !== 'object') continue;
+        const role = message.role === 'system' || message.role === 'assistant' || message.role === 'user' ? message.role : '';
+        const content = typeof message.content === 'string' ? message.content.trim() : '';
+        if (!role || !content) continue;
+        const cleaned = { role, content: content.slice(0, role === 'system' ? 8000 : 4000) };
+        if (role === 'system') system.push(cleaned);
+        else rest.push(cleaned);
+    }
+    const kept = [...system.slice(0, 1), ...rest.slice(-10)];
+    if (!kept.length) return { error: 'messages is required' };
+    const temperature = Number(payload?.temperature);
+    const maxTokens = Number(payload?.max_tokens);
+    return {
+        body: {
+            model,
+            messages: kept,
+            temperature: Number.isFinite(temperature) ? Math.min(Math.max(temperature, 0), 1.5) : 0.7,
+            max_tokens: Number.isFinite(maxTokens) ? Math.min(Math.max(Math.round(maxTokens), 1), 800) : 500
+        }
     };
 }
 
@@ -182,15 +241,16 @@ async function handleTts(req, res, configOptions = {}) {
         return jsonResponse(res, 400, { error: 'Invalid JSON body' });
     }
 
-    const text = cleanTtsText(body.text);
+    const text = cleanTtsText(body?.text);
     if (!text) return jsonResponse(res, 400, { error: 'text is required' });
 
     const { volcano } = await getLocalConfig(configOptions);
     const speed = Number(body.speed || 1);
     const safeSpeed = Number.isFinite(speed) ? Math.min(Math.max(speed, 0.5), 2) : 1;
 
-    if (volcano.apiKey) return synthesizeV3Tts(res, volcano, text, safeSpeed);
-    if (volcano.appId && volcano.accessToken) return synthesizeV1Tts(res, volcano, text, safeSpeed);
+    const fetchImpl = configOptions.fetchImpl || fetch;
+    if (volcano.apiKey) return synthesizeV3Tts(res, volcano, text, safeSpeed, fetchImpl);
+    if (volcano.appId && volcano.accessToken) return synthesizeV1Tts(res, volcano, text, safeSpeed, fetchImpl);
 
     return jsonResponse(res, 500, {
         error: 'Local TTS is not configured',
@@ -198,7 +258,7 @@ async function handleTts(req, res, configOptions = {}) {
     });
 }
 
-async function synthesizeV3Tts(res, volcano, text, safeSpeed) {
+async function synthesizeV3Tts(res, volcano, text, safeSpeed, fetchImpl) {
     if (!volcano.resourceId) {
         return jsonResponse(res, 500, {
             error: 'Local TTS is not configured',
@@ -215,13 +275,14 @@ async function synthesizeV3Tts(res, volcano, text, safeSpeed) {
             audio_params: {
                 format: 'mp3',
                 sample_rate: 24000,
-                speech_rate: safeSpeed
+                // V3 uses percentage change; V1 uses a speed ratio.
+                speech_rate: Math.round((safeSpeed - 1) * 100)
             }
         }
     };
 
     try {
-        const upstream = await fetch(volcano.v3Endpoint, {
+        const upstream = await fetchImpl(volcano.v3Endpoint, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json; charset=utf-8',
@@ -229,7 +290,9 @@ async function synthesizeV3Tts(res, volcano, text, safeSpeed) {
                 'X-Api-Resource-Id': volcano.resourceId,
                 'X-Api-Request-Id': crypto.randomUUID()
             },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
+            redirect: 'error',
+            signal: AbortSignal.timeout(30000)
         });
 
         const textBody = await upstream.text();
@@ -314,7 +377,7 @@ function splitJsonObjects(input) {
     return chunks;
 }
 
-async function synthesizeV1Tts(res, volcano, text, safeSpeed) {
+async function synthesizeV1Tts(res, volcano, text, safeSpeed, fetchImpl) {
     const payload = {
         app: { appid: volcano.appId, token: volcano.accessToken, cluster: volcano.cluster },
         user: { uid: '3dlearn-local' },
@@ -329,13 +392,15 @@ async function synthesizeV1Tts(res, volcano, text, safeSpeed) {
     };
 
     try {
-        const upstream = await fetch(volcano.endpoint, {
+        const upstream = await fetchImpl(volcano.endpoint, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 Authorization: `Bearer;${volcano.accessToken}`
             },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(payload),
+            redirect: 'error',
+            signal: AbortSignal.timeout(30000)
         });
         const data = await upstream.json().catch(() => null);
         if (!upstream.ok || !data) {
@@ -375,24 +440,31 @@ async function handleAiChat(req, res, configOptions = {}) {
         return jsonResponse(res, 400, { error: 'Invalid JSON body' });
     }
 
-    const { zhipuApiKey } = await getLocalConfig(configOptions);
-    if (!zhipuApiKey) {
+    const { chat } = await getLocalConfig(configOptions);
+    if (chat?.error) return jsonResponse(res, 500, { error: chat.error });
+    if (!chat) {
         return jsonResponse(res, 500, {
-            error: 'ZHIPU_API_KEY is not configured',
-            details: 'Set ZHIPU_API_KEY in .env or system environment variables to enable real AI chat.'
+            error: 'AI chat is not configured',
+            details: 'Set AI_CHAT_BASE_URL, AI_CHAT_API_KEY, and AI_CHAT_MODEL, or set ZHIPU_API_KEY.'
         });
     }
 
+    const sanitized = sanitizeChatPayload(payload, chat.model);
+    if (sanitized.error) return jsonResponse(res, 400, { error: sanitized.error });
+
+    const fetchImpl = configOptions.fetchImpl || fetch;
     try {
-        const upstream = await fetch(ZHIPU_API_URL, {
+        const upstream = await fetchImpl(chat.url, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                Authorization: `Bearer ${zhipuApiKey}`
+                Authorization: `Bearer ${chat.apiKey}`
             },
-            body: JSON.stringify(payload)
+            body: JSON.stringify(sanitized.body),
+            redirect: 'error',
+            signal: AbortSignal.timeout(30000)
         });
-        const text = await upstream.text();
+        const text = redact(await upstream.text(), chat.apiKey);
         res.writeHead(upstream.status, {
             'Content-Type': upstream.headers.get('Content-Type') || 'application/json; charset=utf-8',
             'Cache-Control': 'no-store',
@@ -400,24 +472,43 @@ async function handleAiChat(req, res, configOptions = {}) {
         });
         res.end(text);
     } catch (error) {
-        jsonResponse(res, 502, { error: 'AI proxy failed', details: error.message || String(error) });
+        jsonResponse(res, 502, { error: 'AI proxy failed', details: redact(error.message || String(error), chat.apiKey) });
     }
 }
 
-async function serveStatic(req, res) {
-    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-    const target = decodeURIComponent(url.pathname) === '/' ? '/app.html' : decodeURIComponent(url.pathname);
+async function serveStatic(req, res, pathname) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+        return jsonResponse(res, 405, { error: 'Only GET and HEAD are supported' });
+    }
+    const target = pathname === '/' ? '/app.html' : pathname;
+    const segments = target.slice(1).split('/');
+    const extension = path.extname(target).toLowerCase();
+    const publicRootFile = segments.length === 1 && (
+        target === '/app.html' || target === '/index.html' ||
+        ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.mp4'].includes(extension)
+    );
+    if (target.includes('\\') || target.includes('\0') ||
+        segments.some((segment) => segment.startsWith('.')) ||
+        !PUBLIC_EXTENSIONS.has(extension) ||
+        (!publicRootFile && !PUBLIC_DIRS.has(segments[0]))) {
+        return jsonResponse(res, 403, { error: 'Forbidden' });
+    }
     const filePath = path.resolve(ROOT_DIR, `.${target}`);
 
-    if (!filePath.startsWith(ROOT_DIR)) return jsonResponse(res, 403, { error: 'Forbidden' });
+    if (!filePath.startsWith(ROOT_DIR + path.sep)) return jsonResponse(res, 403, { error: 'Forbidden' });
 
     try {
-        const content = await readFile(filePath);
+        const resolvedPath = await realpath(filePath);
+        // Never follow a public-looking symlink into configuration or private source files.
+        if (resolvedPath !== filePath) {
+            return jsonResponse(res, 403, { error: 'Forbidden' });
+        }
+        const content = await readFile(resolvedPath);
         res.writeHead(200, {
             'Content-Type': MIME_TYPES.get(path.extname(filePath).toLowerCase()) || 'application/octet-stream',
             'Cache-Control': 'no-cache'
         });
-        res.end(content);
+        res.end(req.method === 'HEAD' ? undefined : content);
     } catch {
         jsonResponse(res, 404, { error: 'Not found' });
     }
@@ -426,9 +517,16 @@ async function serveStatic(req, res) {
 export function createLocalServer(options = {}) {
     return createServer(async (req, res) => {
         try {
-            if (req.url.startsWith('/api/tts')) return await handleTts(req, res, options);
-            if (req.url.startsWith('/api/ai/chat')) return await handleAiChat(req, res, options);
-            return await serveStatic(req, res);
+            let pathname;
+            try {
+                pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+            } catch {
+                return jsonResponse(res, 400, { error: 'Invalid request URL' });
+            }
+            if (pathname === '/api/tts') return await handleTts(req, res, options);
+            if (pathname === '/api/ai/chat') return await handleAiChat(req, res, options);
+            if (pathname.startsWith('/api/')) return jsonResponse(res, 404, { error: 'Not found' });
+            return await serveStatic(req, res, pathname);
         } catch (error) {
             return jsonResponse(res, 500, { error: 'Local server error', details: error.message || String(error) });
         }

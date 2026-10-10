@@ -15,6 +15,10 @@ window.CircuitOhmScene = class CircuitOhmScene {
         this.quizEl = null;
         this.summaryEl = null;
         this.currentStep = 0;
+        this.quizAnswers = {};
+        this.disposed = false;
+        this.guideTimers = new Set();
+        this.feedbackRequest = 0;
 
         this.state = {
             mode: 'series', // series | parallel
@@ -47,16 +51,64 @@ window.CircuitOhmScene = class CircuitOhmScene {
         this.camera.position.set(this.defaultCameraPos.x, this.defaultCameraPos.y, this.defaultCameraPos.z);
         this.camera.lookAt(0, 0, 0);
 
+        const restored = this.restoreProgress();
         this.setupLights();
         this.setupScene();
         this.setupUI();
 
         if (window.LearningEngine) {
-            window.LearningEngine.createSession(this.sceneId);
+            window.LearningEngine.getSession(this.sceneId);
             window.LearningEngine.completeStep(this.sceneId, 'read');
             window.LearningEngine.logEvent(this.sceneId, 'scene_enter', {});
         }
-        this.showGuide('⚡ 先切换串/并联，再调节电阻，观察电流与亮度变化');
+        this.showGuide(restored ? `📚 已恢复上次进度：第 ${this.currentStep + 1} 步，已保存 ${Object.keys(this.quizAnswers).length} 道作答。` : '⚡ 先切换串/并联，再调节电阻，观察电流与亮度变化');
+        this.persistProgress();
+    }
+
+    restoreProgress() {
+        const session = window.LearningEngine?.getSession(this.sceneId);
+        window.LearningEngine?.completeStep(this.sceneId, 'read');
+        const snapshot = session?.sceneState || {};
+        const values = snapshot.state || {};
+        if (['series', 'parallel'].includes(values.mode)) this.state.mode = values.mode;
+        for (const key of ['resistance1', 'resistance2']) {
+            if (Number.isInteger(values[key]) && values[key] >= 1 && values[key] <= 20) this.state[key] = values[key];
+        }
+        // The teaching task uses a fixed 12 V supply.
+        this.state.voltage = 12;
+        const steps = window.LearningPathConfig?.[this.sceneId]?.steps || [];
+        this.currentStep = Number.isInteger(snapshot.currentStep) ? Math.max(0, Math.min(snapshot.currentStep, steps.length - 1)) : 0;
+        while (this.currentStep > 0 && !window.LearningEngine?.canAccessStep(this.sceneId, steps[this.currentStep].id)) this.currentStep--;
+        const answers = { ...session?.quizAnswers, ...snapshot.quizAnswers };
+        this.quizAnswers = {};
+        (window.QuizBank?.[this.sceneId] || []).forEach(question => {
+            if (question.options.some(option => option.value === answers[question.id])) this.quizAnswers[question.id] = answers[question.id];
+        });
+        return Object.keys(snapshot).length > 0 || (session?.completedSteps.size || 0) > 1;
+    }
+
+    persistProgress() {
+        window.LearningEngine?.updateSceneState?.(this.sceneId, {
+            currentStep: this.currentStep,
+            state: { ...this.state },
+            quizAnswers: { ...this.quizAnswers }
+        });
+    }
+
+    closeLearningPanels() {
+        this.feedbackRequest++;
+        ['blackboardEl', 'quizEl', 'summaryEl'].forEach(key => {
+            this[key]?.remove();
+            this[key] = null;
+        });
+    }
+
+    scheduleGuide(callback, delay) {
+        const timer = setTimeout(() => {
+            this.guideTimers.delete(timer);
+            if (!this.disposed) callback();
+        }, delay);
+        this.guideTimers.add(timer);
     }
 
     setupLights() {
@@ -76,11 +128,25 @@ window.CircuitOhmScene = class CircuitOhmScene {
         this.renderCircuit();
     }
 
+    releaseCircuitObjects() {
+        const objects = this.mainGroup.children.slice(1); // Retain the background grid.
+        const geometries = new Set(), materials = new Set(), textures = new Set();
+        objects.forEach(root => root.traverse(obj => {
+            if (obj.geometry) geometries.add(obj.geometry);
+            const list = Array.isArray(obj.material) ? obj.material : [obj.material];
+            list.filter(Boolean).forEach(material => materials.add(material));
+        }));
+        materials.forEach(material => Object.values(material).forEach(value => {
+            if (value?.isTexture) textures.add(value);
+        }));
+        textures.forEach(texture => texture.dispose());
+        materials.forEach(material => material.dispose());
+        geometries.forEach(geometry => geometry.dispose());
+        objects.forEach(obj => this.mainGroup.remove(obj));
+    }
+
     renderCircuit() {
-        while (this.mainGroup.children.length > 1) {
-            const obj = this.mainGroup.children[this.mainGroup.children.length - 1];
-            this.mainGroup.remove(obj);
-        }
+        this.releaseCircuitObjects();
         this.flowCurves = [];
         this.flowParticles = [];
         this.directionArrows = [];
@@ -100,6 +166,7 @@ window.CircuitOhmScene = class CircuitOhmScene {
         );
         battery.position.set(-4.6, 0, 0.5);
         battery.userData = {
+            onClick: target => this.showInfoPanel(target),
             hoverTitle: '电源',
             hoverDesc: `电压: ${this.state.voltage}V`,
             hoverIcon: 'fa-bolt',
@@ -136,6 +203,7 @@ window.CircuitOhmScene = class CircuitOhmScene {
 
         this.buildWireTopology();
         this.updateCalculatedValues();
+        this.syncCourseLabel();
     }
 
     buildWireTopology() {
@@ -169,8 +237,8 @@ window.CircuitOhmScene = class CircuitOhmScene {
             this.addDirectionArrow(path, 0x38bdf8);
         } else {
             // 并联主干
-            const leftBus = [p.batteryPos, p.nodeA, p.nodeD, p.batteryNeg];
-            const rightBus = [p.nodeB, p.nodeC];
+            const leftBus = [p.batteryPos, p.nodeA, p.nodeD];
+            const rightBus = [p.nodeB, p.nodeC, new THREE.Vector3(4.2, -2.8, 0.8), new THREE.Vector3(-4.6, -2.8, 0.8), p.batteryNeg];
             this.addWire(leftBus, 0x64748b, 0.7);
             this.addWire(rightBus, 0x64748b, 0.7);
 
@@ -283,6 +351,7 @@ window.CircuitOhmScene = class CircuitOhmScene {
             new THREE.MeshStandardMaterial({ color })
         );
         mesh.userData = {
+            onClick: target => this.showInfoPanel(target),
             hoverTitle: `${name} 电阻`,
             hoverDesc: `${resistance}Ω`,
             hoverIcon: 'fa-sliders-h',
@@ -299,11 +368,12 @@ window.CircuitOhmScene = class CircuitOhmScene {
             new THREE.MeshStandardMaterial({ color: 0x9ca3af, emissive: 0x000000, emissiveIntensity: 0 })
         );
         mesh.userData = {
-            hoverTitle: `${name} 灯泡`,
-            hoverDesc: '亮度与功率相关',
+            onClick: target => this.showInfoPanel(target),
+            hoverTitle: `${name} 功率指示灯`,
+            hoverDesc: '亮度示意对应电阻的功率',
             hoverIcon: 'fa-lightbulb',
-            name: `${name} 灯泡`,
-            description: `<p>${name} 亮度由电流与功率决定。</p>`
+            name: `${name} 功率指示灯`,
+            description: `<p>${name} 的亮度示意对应电阻消耗的功率，不额外计入电路电阻。</p>`
         };
         this.interactables.push(mesh);
         return mesh;
@@ -413,17 +483,25 @@ window.CircuitOhmScene = class CircuitOhmScene {
     }
 
     switchMode(mode) {
+        if (!['series', 'parallel'].includes(mode)) return;
+        this.demoState = null;
         this.state.mode = mode;
         this.renderCircuit();
         window.LearningEngine?.recordExplore(this.sceneId, `mode-${mode}`);
         window.LearningEngine?.completeStep(this.sceneId, mode === 'series' ? 'observe-series' : 'observe-parallel');
+        this.persistProgress();
     }
 
-    updateResistance(key, value) {
-        this.state[key] = value;
+    updateResistance(key, value, fromDemo = false) {
+        if (!['resistance1', 'resistance2'].includes(key) || !Number.isFinite(value)) return;
+        if (!fromDemo) this.demoState = null;
+        this.state[key] = Math.max(1, Math.min(20, Math.round(value)));
+        const input = document.getElementById(key === 'resistance1' ? 'co-r1' : 'co-r2');
+        if (input) input.value = String(this.state[key]);
         this.renderCircuit();
         window.LearningEngine?.recordExplore(this.sceneId, key);
         window.LearningEngine?.completeStep(this.sceneId, 'ohm-verify');
+        this.persistProgress();
     }
 
     showStepGuide() {
@@ -459,6 +537,7 @@ window.CircuitOhmScene = class CircuitOhmScene {
         document.getElementById('co-close-guide').onclick = () => this.blackboardEl?.remove();
         document.getElementById('co-prev-step').onclick = () => {
             this.currentStep = Math.max(0, this.currentStep - 1);
+            this.persistProgress();
             this.showStepGuide();
         };
         document.getElementById('co-next-step').onclick = () => {
@@ -469,6 +548,7 @@ window.CircuitOhmScene = class CircuitOhmScene {
             }
             const max = (window.LearningPathConfig?.[this.sceneId]?.steps?.length || 1) - 1;
             this.currentStep = Math.min(max, this.currentStep + 1);
+            this.persistProgress();
             this.showStepGuide();
         };
         document.getElementById('co-run-step').onclick = () => this.executeStepAction(this.currentStep);
@@ -490,13 +570,18 @@ window.CircuitOhmScene = class CircuitOhmScene {
         const stepIndex = Number(action);
         const stepIds = ['read', 'observe-series', 'observe-parallel', 'ohm-verify', 'practice', 'summary'];
         const targetId = stepIds[stepIndex];
+        if (!targetId) return;
         if (targetId && !window.LearningEngine?.canAccessStep(this.sceneId, targetId)) {
             this.showGuide('⛳ 请按步骤完成前置学习内容');
             return;
         }
-        if (targetId) {
-            window.LearningEngine?.completeStep(this.sceneId, targetId);
-        }
+        this.currentStep = stepIndex;
+        this.persistProgress();
+        if (targetId === 'practice') { this.closeLearningPanels(); this.showQuizPanel(); return; }
+        if (targetId === 'summary') { this.closeLearningPanels(); this.showSummaryCard(); return; }
+        this.blackboardEl?.remove();
+        this.blackboardEl = null;
+        if (targetId === 'read') window.LearningEngine?.completeStep(this.sceneId, targetId);
 
         // 演示动作更具体，确保“步骤可演示”
         if (targetId === 'observe-series') {
@@ -514,6 +599,7 @@ window.CircuitOhmScene = class CircuitOhmScene {
     }
 
     startOhmLawDemo() {
+        this.updateResistance('resistance1', this.state.resistance1 === 12 ? 6 : 12);
         this.demoState = {
             type: 'ohm',
             t: 0,
@@ -532,7 +618,8 @@ window.CircuitOhmScene = class CircuitOhmScene {
             this.showGuide('📌 请先完成串联、并联和欧姆验证步骤后再做练习。');
             return;
         }
-        if (this.quizEl) this.quizEl.remove();
+        this.closeLearningPanels();
+        this.demoState = null;
         const quizList = window.QuizBank?.[this.sceneId] || [];
         const parent = document.getElementById('view-scene');
         this.quizEl = document.createElement('div');
@@ -549,7 +636,7 @@ window.CircuitOhmScene = class CircuitOhmScene {
                             <p style="margin:0 0 8px;"><b>${idx + 1}. [${q.level}]</b> ${q.question}</p>
                             ${q.options.map(opt => `
                                 <label style="display:block; margin:4px 0;">
-                                    <input type="radio" name="${q.id}" value="${opt.value}"> ${opt.label}
+                                    <input type="radio" name="${q.id}" value="${opt.value}" ${this.quizAnswers[q.id] === opt.value ? 'checked' : ''}> ${opt.label}
                                 </label>
                             `).join('')}
                         </div>
@@ -563,37 +650,53 @@ window.CircuitOhmScene = class CircuitOhmScene {
         `;
         parent.appendChild(this.quizEl);
         window.LearningEngine?.logEvent(this.sceneId, 'quiz_open', {});
+        this.quizEl.querySelectorAll('input[type="radio"]').forEach(input => {
+            input.onchange = () => {
+                this.quizAnswers[input.name] = input.value;
+                this.persistProgress();
+            };
+        });
 
-        document.getElementById('co-close-quiz').onclick = () => this.quizEl?.remove();
+        document.getElementById('co-close-quiz').onclick = () => this.closeLearningPanels();
         document.getElementById('co-submit-quiz').onclick = () => this.submitQuiz();
     }
 
     submitQuiz() {
         const quizList = window.QuizBank?.[this.sceneId] || [];
         const feedbackBox = document.getElementById('co-quiz-feedback');
-        let html = '';
-        let answeredCount = 0;
-        quizList.forEach((q) => {
-            const selected = document.querySelector(`input[name="${q.id}"]:checked`);
-            if (!selected) return;
-            answeredCount += 1;
-            const result = window.LearningEngine?.submitAnswer(this.sceneId, q, selected.value);
-            html += result?.isCorrect ? `<p>✅ ${q.id}: 回答正确</p>` : `<p>❌ ${q.id}: ${q.feedbackTemplate}</p>`;
-        });
-
-        if (answeredCount < quizList.length) {
-            feedbackBox.innerHTML = `请先完成全部 ${quizList.length} 题再提交。`;
+        if (!feedbackBox || !window.LearningEngine?.canStartQuiz(this.sceneId)) return;
+        const answers = quizList.map(question => ({
+            question,
+            value: this.quizEl?.querySelector(`input[name="${question.id}"]:checked`)?.value
+        }));
+        if (!quizList.length || answers.some(({ question, value }) => !question.options.some(option => option.value === value))) {
+            feedbackBox.textContent = `请先完成全部 ${quizList.length} 题再提交。`;
             return;
         }
-        window.LearningEngine?.completeStep(this.sceneId, 'practice');
-        window.LearningEngine?.logEvent(this.sceneId, 'quiz_submit_all', { answeredCount, total: quizList.length });
-        feedbackBox.innerHTML = html;
+        const feedback = answers.map(({ question, value }, index) => {
+            this.quizAnswers[question.id] = value;
+            const result = window.LearningEngine.submitAnswer(this.sceneId, question, value);
+            return result.isCorrect ? `<p>✅ 第 ${index + 1} 题：回答正确</p>` : `<p>❌ 第 ${index + 1} 题：${question.feedbackTemplate}</p>`;
+        });
+        window.LearningEngine.completeStep(this.sceneId, 'practice');
+        window.LearningEngine.logEvent(this.sceneId, 'quiz_submit_all', { answeredCount: answers.length, total: quizList.length });
+        this.currentStep = 4;
+        this.persistProgress();
+        feedbackBox.innerHTML = feedback.join('') + '<p>练习已提交，可修改答案后重试，或查看学习总结。</p><button class="control-btn" id="co-quiz-summary">查看学习总结</button>';
+        document.getElementById('co-quiz-summary').onclick = () => this.showSummaryCard();
     }
 
     showSummaryCard() {
-        if (this.summaryEl) this.summaryEl.remove();
+        if (!window.LearningEngine?.canAccessStep(this.sceneId, 'summary')) {
+            this.showGuide('📌 请先完成全部练习并提交，再查看学习总结。');
+            return;
+        }
+        this.closeLearningPanels();
+        this.demoState = null;
+        window.LearningEngine.completeStep(this.sceneId, 'summary');
+        this.currentStep = 5;
+        this.persistProgress();
         const summary = window.LearningEngine?.getSummary(this.sceneId) || { score: 0, level: '未开始', weakPoints: [], suggestion: '先完成步骤和练习。' };
-        window.LearningEngine?.completeStep(this.sceneId, 'summary');
         const weakMap = {
             'series-parallel': '串并联辨识',
             'ohm-calc': '欧姆定律计算',
@@ -626,21 +729,27 @@ window.CircuitOhmScene = class CircuitOhmScene {
     }
 
     showGuide(message) {
+        if (this.disposed) return;
         const container = document.getElementById('scene-canvas-container');
         const old = container.querySelector('.scene-guide-message');
         if (old) old.remove();
         const guide = document.createElement('div');
+        this.guide = guide;
         guide.className = 'scene-guide-message';
         guide.innerHTML = message;
         container.appendChild(guide);
-        setTimeout(() => guide.classList.add('visible'), 80);
-        setTimeout(() => {
+        this.scheduleGuide(() => guide.classList.add('visible'), 80);
+        this.scheduleGuide(() => {
             guide.classList.remove('visible');
-            setTimeout(() => guide.remove(), 280);
+            this.scheduleGuide(() => guide.remove(), 280);
         }, 3000);
     }
 
     reset() {
+        this.closeLearningPanels();
+        this.demoState = null;
+        this.currentStep = 0;
+        this.quizAnswers = {};
         this.state = { mode: 'series', resistance1: 6, resistance2: 6, voltage: 12 };
         const r1 = document.getElementById('co-r1');
         const r2 = document.getElementById('co-r2');
@@ -648,8 +757,9 @@ window.CircuitOhmScene = class CircuitOhmScene {
         if (r2) r2.value = this.state.resistance2;
         this.renderCircuit();
         window.LearningEngine?.resetSession(this.sceneId);
-        window.LearningEngine?.createSession(this.sceneId);
+        window.LearningEngine?.getSession(this.sceneId);
         window.LearningEngine?.completeStep(this.sceneId, 'read');
+        this.persistProgress();
         this.showGuide('🔄 电路参数与学习进度已重置');
     }
 
@@ -671,9 +781,10 @@ window.CircuitOhmScene = class CircuitOhmScene {
         panel.classList.add('visible');
     }
 
-    animate(time) {
+    animate(time, delta = 0.016) {
         // 电流粒子沿线路流动，体现方向和强弱
-        this.flowTick += 0.016;
+        const dt = Math.min(Math.max(Number.isFinite(delta) ? delta : 0.016, 0), 0.1);
+        this.flowTick += dt;
         const baseCurrent = Math.max(this.lastCalc?.totalCurrent || 0.1, 0.1);
         this.flowParticles.forEach(({ curve, particles }) => {
             particles.forEach((particle) => {
@@ -686,15 +797,12 @@ window.CircuitOhmScene = class CircuitOhmScene {
 
         // 欧姆演示：自动扫动电阻
         if (this.demoState?.type === 'ohm') {
-            this.demoState.t += 0.02;
+            this.demoState.t += dt * 1.25;
             const nextR = 3 + (Math.sin(this.demoState.t) + 1) * 7; // 3~17
             const rounded = Math.round(nextR);
             if (rounded !== this.demoState.lastR1) {
-                this.state.resistance1 = rounded;
                 this.demoState.lastR1 = rounded;
-                const r1Input = document.getElementById('co-r1');
-                if (r1Input) r1Input.value = String(this.state.resistance1);
-                this.renderCircuit();
+                this.updateResistance('resistance1', rounded, true);
             }
 
             if (this.demoState.t > Math.PI * 2) {
@@ -719,10 +827,38 @@ window.CircuitOhmScene = class CircuitOhmScene {
     }
 
     createLabels(manager) {
-        manager.createLabel(this.state.mode === 'series' ? '串联模式' : '并联模式', new THREE.Vector3(0, 3.1, 0.8), 'bolt');
+        this.removeCourseLabel();
+        this.labelManager = manager;
+        const element = manager.createLabel('', new THREE.Vector3(0, 3.1, 0.8), 'bolt');
+        this.courseLabel = manager.labels.find(label => label.element === element);
+        this.syncCourseLabel();
+    }
+
+    syncCourseLabel() {
+        if (this.courseLabel) {
+            this.courseLabel.element.innerHTML = `<i class="fas fa-bolt"></i>${this.state.mode === 'series' ? '串联模式' : '并联模式'}`;
+        }
+    }
+
+    removeCourseLabel() {
+        if (this.courseLabel) {
+            this.courseLabel.container.remove();
+            const index = this.labelManager?.labels.indexOf(this.courseLabel) ?? -1;
+            if (index >= 0) this.labelManager.labels.splice(index, 1);
+        }
+        this.courseLabel = null;
+        this.labelManager = null;
     }
 
     dispose() {
+        this.removeCourseLabel();
+        this.persistProgress();
+        this.disposed = true;
+        this.demoState = null;
+        this.feedbackRequest++;
+        this.guideTimers.forEach(timer => clearTimeout(timer));
+        this.guideTimers.clear();
+        this.guide?.remove();
         this.blackboardEl?.remove();
         this.quizEl?.remove();
         this.summaryEl?.remove();

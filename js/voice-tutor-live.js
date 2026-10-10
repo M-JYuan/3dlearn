@@ -14,6 +14,7 @@
         stopBtn: null,
         audio: null,
         audioUrl: null,
+        finishPlayback: null,
         browserSpeechUtterance: null,
         requestSeq: 0,
         abortController: null,
@@ -136,6 +137,7 @@
         },
 
         setThinking() {
+            this.clearPendingSpeech();
             this.requestSeq += 1;
             if (this.abortController) {
                 this.abortController.abort();
@@ -150,7 +152,7 @@
         async speak(text, options = {}) {
             const cleanText = this.normalizeText(text);
             if (!cleanText) {
-                this.setState('idle');
+                this.stop();
                 return;
             }
 
@@ -169,6 +171,11 @@
             };
 
             const requestId = ++this.requestSeq;
+            this.clearPendingSpeech();
+            this.abortController?.abort();
+            this.abortController = null;
+            this.stopAudioOnly();
+            this.pauseVideo();
             if (!deferSubtitleUntilAudio) {
                 this.showSubtitle(cleanText);
             }
@@ -198,6 +205,7 @@
                     this.showSubtitle(cleanText);
                 }
                 notifySpeechCallback(onAudioReady);
+                if (requestId !== this.requestSeq) return;
                 await this.playBlob(audioBlob, requestId, cleanText);
             } catch (error) {
                 if (error.name === 'AbortError' || requestId !== this.requestSeq) {
@@ -210,6 +218,7 @@
                 console.error('[VoiceTutor] speak failed:', error);
                 window.AvatarTutor?.stopSpeech?.();
                 this.pauseVideo();
+                if (this.stopBtn) this.stopBtn.hidden = true;
                 this.setState('error');
             } finally {
                 if (requestId === this.requestSeq) {
@@ -237,6 +246,7 @@
         playBlob(blob, requestId, fallbackText = '') {
             return new Promise((resolve, reject) => {
                 this.stopAudioOnly({ keepSpeechGesture: true, keepStopButton: true });
+                this.finishPlayback = resolve;
                 const url = URL.createObjectURL(blob);
                 this.audioUrl = url;
                 const audio = new Audio(url);
@@ -244,6 +254,7 @@
                 window.AvatarTutor?.attachAudio?.(audio);
                 const isStale = () => requestId !== this.requestSeq;
                 const cleanup = () => {
+                    if (this.finishPlayback === resolve) this.finishPlayback = null;
                     if (this.audioUrl === url) {
                         this.revokeAudioUrl();
                     } else {
@@ -309,7 +320,8 @@
                     if (fallbackText && error.name === 'NotAllowedError' && this.queueAudioForUserGesture(blob, fallbackText)) {
                         resolve();
                         return;
-                    }                    window.AvatarTutor?.stopSpeech?.();
+                    }
+                    window.AvatarTutor?.stopSpeech?.();
                     reject(error);
                 });
             });
@@ -407,6 +419,10 @@
         },
 
         stopAudioOnly(options = {}) {
+            if (this.finishPlayback) {
+                this.finishPlayback();
+                this.finishPlayback = null;
+            }
             const keepSpeechGesture = options.keepSpeechGesture === true;
             const keepStopButton = options.keepStopButton === true;
             if (this.browserSpeechUtterance || window.speechSynthesis?.speaking) {
@@ -427,6 +443,7 @@
         },
 
         stop() {
+            this.clearPendingSpeech();
             this.requestSeq += 1;
             if (this.abortController) {
                 this.abortController.abort();

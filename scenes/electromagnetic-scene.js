@@ -14,6 +14,9 @@ window.ElectromagneticScene = class ElectromagneticScene {
         this.renderer = renderer;
         
         this.mainGroup = null;
+        this.disposed = false;
+        this.timers = new Set();
+        this.guide = null;
         this.interactables = [];
         this.highlighted = null;
         
@@ -368,7 +371,28 @@ window.ElectromagneticScene = class ElectromagneticScene {
         document.getElementById('btn-reset-view').onclick = () => this.resetView();
     }
 
+    schedule(callback, delay) {
+        if (this.disposed) return;
+        const timer = setTimeout(() => {
+            this.timers.delete(timer);
+            if (!this.disposed) callback();
+        }, delay);
+        this.timers.add(timer);
+        return timer;
+    }
+
+    cancelScheduled() {
+        this.timers.forEach(timer => clearTimeout(timer));
+        this.timers.clear();
+        this.isAutoPlaying = false;
+        this.guide?.remove();
+        this.guide = null;
+    }
+
     moveMagnet(direction) {
+        if (this.disposed) return;
+        this.cancelScheduled();
+        gsap.killTweensOf(this.magnet.position);
         this.params.isMoving = true;
         this.params.direction = direction;
         this.params.magnetVelocity = direction * 0.15;
@@ -379,6 +403,10 @@ window.ElectromagneticScene = class ElectromagneticScene {
     }
 
     autoDemo() {
+        if (this.disposed) return;
+        this.cancelScheduled();
+        gsap.killTweensOf(this.magnet.position);
+        this.params.isMoving = false;
         this.showGuide('🔄 自动演示：观察磁铁往复运动产生的感应电流');
         
         const animate = () => {
@@ -404,6 +432,10 @@ window.ElectromagneticScene = class ElectromagneticScene {
     }
 
     resetScene() {
+        if (this.disposed) return;
+        this.cancelScheduled();
+        gsap.killTweensOf(this.magnet.position);
+        this.params.isMoving = false;
         this.params.magnetY = 5;
         this.params.magnetVelocity = 0;
         this.params.inducedCurrent = 0;
@@ -423,27 +455,31 @@ window.ElectromagneticScene = class ElectromagneticScene {
     }
 
     startAutoPlay() {
+        if (this.disposed) return;
+        this.cancelScheduled();
         this.isAutoPlaying = true;
-        setTimeout(() => {
+        this.schedule(() => {
             this.showGuide('🧲 观察：磁铁穿过线圈时会产生感应电流');
-            setTimeout(() => this.autoDemo(), 2000);
+            this.schedule(() => this.autoDemo(), 2000);
         }, 500);
     }
 
     showGuide(message) {
+        if (this.disposed) return;
         const container = document.getElementById('scene-canvas-container');
         const old = container.querySelector('.scene-guide-message');
         if (old) old.remove();
         
         const guide = document.createElement('div');
+        this.guide = guide;
         guide.className = 'scene-guide-message';
         guide.innerHTML = message;
         container.appendChild(guide);
         
-        setTimeout(() => guide.classList.add('visible'), 100);
-        setTimeout(() => {
+        this.schedule(() => guide.classList.add('visible'), 100);
+        this.schedule(() => {
             guide.classList.remove('visible');
-            setTimeout(() => guide.remove(), 300);
+            this.schedule(() => guide.remove(), 300);
         }, 3500);
     }
 
@@ -505,6 +541,10 @@ window.ElectromagneticScene = class ElectromagneticScene {
     }
 
     dispose() {
+        this.disposed = true;
+        this.cancelScheduled();
+        if (this.magnet) gsap.killTweensOf(this.magnet.position);
+        this.params.isMoving = false;
         if (this.mainGroup) this.scene.remove(this.mainGroup);
     }
 
